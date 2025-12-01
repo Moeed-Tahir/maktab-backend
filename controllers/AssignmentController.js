@@ -418,7 +418,6 @@ const getAllAssignment = async (req, res) => {
       query.teacher = teacherId;
     }
 
-    // Search functionality
     if (search) {
       query.$or = [
         { title: { $regex: search, $options: 'i' } },
@@ -426,12 +425,10 @@ const getAllAssignment = async (req, res) => {
       ];
     }
 
-    // Calculate pagination
     const pageNumber = parseInt(page);
     const pageSize = parseInt(limit);
     const skip = (pageNumber - 1) * pageSize;
 
-    // Get total count for pagination info
     const totalAssessments = await Assignment.countDocuments(query);
 
     const assessments = await Assignment.find(query)
@@ -549,7 +546,7 @@ const assignmentCheck = async () => {
 
 const getAssignmentAgainstTeacher = async (req, res) => {
   try {
-    const { teacherId } = req.body;
+    const { teacherId, page = 1, limit = 10, search = "" } = req.body;
 
     if (!teacherId) {
       return res.status(400).json({
@@ -558,20 +555,66 @@ const getAssignmentAgainstTeacher = async (req, res) => {
       });
     }
 
-    const assignments = await mongoose.model("Assignment").find({
-      teacher: teacherId
-    })
-      .populate("class", "name")
-      .populate("teacher", "name email")
-      .populate("student", "studentName email")
-      .populate("solutions.student", "studentName email")
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 10;
+    
+    const finalLimit = Math.min(Math.max(limitNum, 1), 100);
+    const finalPage = Math.max(pageNum, 1);
+    const skip = (finalPage - 1) * finalLimit;
+
+    const query = { teacher: teacherId };
+
+    if (search && search.trim() !== "") {
+      const regex = new RegExp(search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      query.$or = [
+        { title: regex },
+        { description: regex },
+        { subject: regex },
+        { 'class.name': regex },
+        { 'student.studentName': regex }
+      ];
+    }
+
+    const assignments = await mongoose.model("Assignment")
+      .find(query)
+      .populate({
+        path: "class",
+        select: "name"
+      })
+      .populate({
+        path: "teacher",
+        select: "name email"
+      })
+      .populate({
+        path: "student",
+        select: "studentName email"
+      })
+      .populate({
+        path: "solutions.student",
+        select: "studentName email"
+      })
       .select("title description subject type totalMarks dateAssigned dueDate attachments solutions class teacher student")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(finalLimit)
+      .lean();
+
+    const total = await mongoose.model("Assignment").countDocuments(query);
+
+    const totalPages = Math.ceil(total / finalLimit);
 
     return res.status(200).json({
       success: true,
       message: "Assignments fetched successfully",
-      assignments: assignments
+      assignments: assignments,
+      pagination: {
+        page: finalPage,
+        limit: finalLimit,
+        total,
+        totalPages,
+        hasNextPage: finalPage < totalPages,
+        hasPrevPage: finalPage > 1
+      }
     });
 
   } catch (error) {

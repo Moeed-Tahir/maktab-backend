@@ -271,19 +271,52 @@ const getAllStudent = async (req, res) => {
 
 const getAllWaitlistStudent = async (req, res) => {
   try {
-    const waitlist = await Student.find({ addToWaitList: true })
+    let { limit = 10, page = 1, search = "" } = req.body;
+
+    limit = Number(limit) || 10;    
+    page = Number(page) || 1;
+    const skip = (page - 1) * limit;
+
+    let searchFilter = {};
+    if (search && search.trim() !== "") {
+      const regex = new RegExp(search, "i"); 
+      searchFilter = {
+        $or: [
+          { name: regex },
+          { email: regex },
+          { phone: regex }
+        ]
+      };
+    }
+
+    const query = {
+      addToWaitList: true,
+      ...searchFilter,
+    };
+
+    const waitlist = await Student.find(query)
       .populate("parent")
-      .populate("class");
+      .populate("class")
+      .skip(skip)
+      .limit(limit);
+
+    const total = await Student.countDocuments(query);
 
     return res.status(200).json({
       message: "Waitlist students fetched successfully.",
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
       waitlist,
     });
+
   } catch (error) {
     console.error("❌ Error fetching waitlisted students:", error);
     return res.status(500).json({ message: error.message });
   }
 };
+
 
 const addToWaitlist = async (req, res) => {
   try {

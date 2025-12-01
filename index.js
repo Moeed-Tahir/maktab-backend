@@ -7,7 +7,6 @@ const http = require("http");
 const { Server } = require("socket.io");
 const { processPendingPayments, processRecurringPayments } = require("./controllers/ParentController");
 const Message = require("./models/Messages");
-
 const authRoutes = require("./routes/authRoutes");
 const teacherRoutes = require("./routes/teacherRoutes");
 const attendanceRoutes = require("./routes/attendanceRoutes");
