@@ -3,6 +3,7 @@ const Student = require("../models/Student");
 const Teacher = require("../models/Teacher");
 const Invoice = require("../models/Invoice");
 const Payment = require("../models/Payments");
+const User = require("../models/User");
 
 const getDashboardStats = async (req, res) => {
     try {
@@ -13,6 +14,9 @@ const getDashboardStats = async (req, res) => {
         const totalStudents = await Student.countDocuments();
         const totalTeachers = await Teacher.countDocuments();
         const totalInvoices = await Invoice.countDocuments();
+
+        // Total admins
+        const totalAdmins = await User.countDocuments({ role: { $in: ["Super Admin", "Admin", "SubAdmin"] } });
 
         const totalPaidAgg = await Payment.aggregate([
             { $match: { status: "succeeded" } },
@@ -137,6 +141,7 @@ const getDashboardStats = async (req, res) => {
                 totalStudents,
                 totalTeachers,
                 totalInvoices,
+                totalAdmins, // <-- Added here
                 totalPaidAmount,
                 totalUnpaidAmount,
                 paidPercentage:

@@ -23,8 +23,10 @@ const gradeRoutes = require("./routes/gradeRoutes");
 const messagesRoutes = require("./routes/messagesRoutes");
 const eventRoutes = require("./routes/eventRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
+// const contactUsRoutes = require("./routes/contactusRoutes");
 
 const { assignmentCheck } = require("./controllers/AssignmentController");
+const dbConnect = require("./utils/dbConnect");
 
 const app = express();
 const server = http.createServer(app);
@@ -56,6 +58,7 @@ app.use("/api", gradeRoutes);
 app.use("/api", messagesRoutes);
 app.use("/api", eventRoutes);
 app.use("/api", notificationRoutes);
+// app.use("/api", contactUsRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running...");
@@ -134,8 +137,7 @@ io.on("connection", (socket) => {
   });
 });
 
-mongoose
-  .connect(process.env.MONGO_URI)
+dbConnect()
   .then(() => {
     console.log("MongoDB connected");
 

@@ -5,18 +5,19 @@ const mongoose = require("mongoose");
 
 const createClass = async (req, res) => {
   try {
-    const { name, code, subject, description, teacherId, startDate, endDate } = req.body;
+    const { name, code, subject, description, teacherId, startDate, endDate } =
+      req.body;
 
     if (!teacherId || !name || !subject) {
       return res.status(400).json({
-        message: "Teacher, name, and subject are required"
+        message: "Teacher, name, and subject are required",
       });
     }
 
     const teacher = await Teacher.findById(teacherId);
     if (!teacher) {
       return res.status(404).json({
-        message: "Teacher not found"
+        message: "Teacher not found",
       });
     }
 
@@ -43,7 +44,7 @@ const createClass = async (req, res) => {
     console.error("Error creating class:", error);
     return res.status(500).json({
       message: "Server error",
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -54,14 +55,14 @@ const deleteClass = async (req, res) => {
 
     if (!classId) {
       return res.status(400).json({
-        message: "Class ID is required"
+        message: "Class ID is required",
       });
     }
 
     const classToDelete = await Class.findById(classId).populate("teacherId");
     if (!classToDelete) {
       return res.status(404).json({
-        message: "Class not found"
+        message: "Class not found",
       });
     }
 
@@ -69,7 +70,7 @@ const deleteClass = async (req, res) => {
 
     if (teacher) {
       teacher.assignedClasses = teacher.assignedClasses.filter(
-        classId => classId.toString() !== classId
+        (classId) => classId.toString() !== classId
       );
       await teacher.save();
     }
@@ -83,14 +84,13 @@ const deleteClass = async (req, res) => {
 
     return res.status(200).json({
       message: "Class and all related data deleted successfully.",
-      deletedClassId: classId
+      deletedClassId: classId,
     });
-
   } catch (error) {
     console.error("Error deleting class:", error);
-    return res.status(500).json({ 
-      message: "Server error", 
-      error: error.message 
+    return res.status(500).json({
+      message: "Server error",
+      error: error.message,
     });
   }
 };
@@ -101,7 +101,7 @@ const getAllClassesName = async (req, res) => {
 
     if (!classes || classes.length === 0) {
       return res.status(404).json({
-        message: "No classes found"
+        message: "No classes found",
       });
     }
 
@@ -113,155 +113,82 @@ const getAllClassesName = async (req, res) => {
     console.error("Error fetching classes:", error);
     return res.status(500).json({
       message: "Server error",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 const getAllClasses = async (req, res) => {
   try {
-    const { studentId, teacherId, search, page = 1, limit = 10 } = req.body;
+    const { adminId, search, page = 1, limit = 10 } = req.body;
+
+    if (!adminId) {
+      return res.status(400).json({ message: "adminId is required" });
+    }
 
     const pageNumber = parseInt(page);
     const limitNumber = parseInt(limit);
     const skip = (pageNumber - 1) * limitNumber;
 
-    if (studentId) {
-      const student = await Student.findOne({
-        $or: [
-          { _id: studentId },
-          { user: studentId }
-        ]
-      }).populate("classes");
+    const students = await Student.find({ createdBy: adminId }).select(
+      "classes"
+    );
 
-      if (!student) {
-        return res.status(404).json({ message: "Student not found" });
-      }
-
-      const classIds = student.classes.map(c => c._id);
-
-      if (classIds.length === 0) {
-        return res.status(200).json({
-          message: "Classes fetched successfully",
-          classes: [],
-          count: 0,
-          totalCount: 0,
-          currentPage: pageNumber,
-          totalPages: 0,
-          hasNextPage: false,
-          hasPrevPage: false
-        });
-      }
-
-      let classQuery = { _id: { $in: classIds } };
-
-      if (search) {
-        classQuery.$or = [
-          { className: { $regex: search, $options: "i" } },
-          { subject: { $regex: search, $options: "i" } },
-          { description: { $regex: search, $options: "i" } }
-        ];
-      }
-
-      const totalCount = await Class.countDocuments(classQuery);
-      const totalPages = Math.ceil(totalCount / limitNumber);
-
-      const classes = await Class.find(classQuery)
-        .populate("teacherId", "fullName email phone")
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limitNumber);
-
+    if (!students.length) {
       return res.status(200).json({
-        message: "Classes fetched successfully",
-        classes,
-        count: classes.length,
-        totalCount,
+        message: "No classes found for this admin",
+        classes: [],
+        count: 0,
+        totalCount: 0,
         currentPage: pageNumber,
-        totalPages,
-        hasNextPage: pageNumber < totalPages,
-        hasPrevPage: pageNumber > 1
+        totalPages: 0,
+        hasNextPage: false,
+        hasPrevPage: false,
       });
     }
 
-    else if (teacherId) {
-      const teacher = await Teacher.findOne({
-        $or: [
-          { _id: teacherId },
-          { user: teacherId }
-        ]
-      }).populate({
-        path: "assignedClasses",
-        match: search
-          ? {
-              $or: [
-                { className: { $regex: search, $options: "i" } },
-                { subject: { $regex: search, $options: "i" } }
-              ]
-            }
-          : {}
-      });
+    const classIds = [
+      ...new Set(
+        students.flatMap((student) =>
+          student.classes.map((cls) => cls.toString())
+        )
+      ),
+    ];
 
-      if (!teacher) {
-        return res.status(404).json({ message: "Teacher not found" });
-      }
+    let classQuery = { _id: { $in: classIds } };
 
-      const classes = teacher.assignedClasses || [];
-
-      const totalCount = classes.length;
-      const totalPages = Math.ceil(totalCount / limitNumber);
-
-      const paginatedClasses = classes.slice(skip, skip + limitNumber);
-
-      return res.status(200).json({
-        message: "Classes fetched successfully",
-        classes: paginatedClasses,
-        count: paginatedClasses.length,
-        totalCount,
-        currentPage: pageNumber,
-        totalPages,
-        hasNextPage: pageNumber < totalPages,
-        hasPrevPage: pageNumber > 1
-      });
+    if (search) {
+      classQuery.$or = [
+        { name: { $regex: search, $options: "i" } },
+        { subject: { $regex: search, $options: "i" } },
+        { description: { $regex: search, $options: "i" } },
+      ];
     }
 
-    else {
-      let classQuery = {};
+    const totalCount = await Class.countDocuments(classQuery);
+    const totalPages = Math.ceil(totalCount / limitNumber);
 
-      if (search) {
-        classQuery.$or = [
-          { className: { $regex: search, $options: "i" } },
-          { subject: { $regex: search, $options: "i" } },
-          { description: { $regex: search, $options: "i" } }
-        ];
-      }
+    const classes = await Class.find(classQuery)
+      .populate("teacherId", "fullName email phone")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNumber);
 
-      const totalCount = await Class.countDocuments(classQuery);
-      const totalPages = Math.ceil(totalCount / limitNumber);
-
-      const allClasses = await Class.find(classQuery)
-        .populate("teacherId", "fullName email phone")
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limitNumber);
-
-      return res.status(200).json({
-        message: "All classes fetched successfully",
-        classes: allClasses,
-        count: allClasses.length,
-        totalCount,
-        currentPage: pageNumber,
-        totalPages,
-        hasNextPage: pageNumber < totalPages,
-        hasPrevPage: pageNumber > 1
-      });
-    }
-
+    return res.status(200).json({
+      message: "Classes fetched successfully",
+      classes,
+      count: classes.length,
+      totalCount,
+      currentPage: pageNumber,
+      totalPages,
+      hasNextPage: pageNumber < totalPages,
+      hasPrevPage: pageNumber > 1,
+    });
   } catch (error) {
     console.error("Error fetching classes:", error);
     return res.status(500).json({
       message: "Server error",
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -272,31 +199,33 @@ const getClassByID = async (req, res) => {
 
     if (!classId) {
       return res.status(400).json({
-        message: "Class ID is required"
+        message: "Class ID is required",
       });
     }
 
     if (!mongoose.Types.ObjectId.isValid(classId)) {
       return res.status(400).json({
-        message: "Invalid Class ID format"
+        message: "Invalid Class ID format",
       });
     }
 
     const classData = await Class.findById(classId)
-      .populate('teacherId', 'fullName email phone profilePicture')
+      .populate("teacherId", "fullName email phone profilePicture")
       .lean();
 
     if (!classData) {
       return res.status(404).json({
-        message: "Class not found"
+        message: "Class not found",
       });
     }
 
     const studentsInClass = await Student.find({
-      classes: classId
+      classes: classId,
     })
-      .select('studentName email phone dateOfBirth gender enrollDate fee parent')
-      .populate('parent', 'parentName email phone relationship')
+      .select(
+        "studentName email phone dateOfBirth gender enrollDate fee parent"
+      )
+      .populate("parent", "parentName email phone relationship")
       .sort({ studentName: 1 });
 
     const studentCount = await Student.countDocuments({ classes: classId });
@@ -305,40 +234,49 @@ const getClassByID = async (req, res) => {
       message: "Class details fetched successfully",
       class: {
         ...classData,
-        studentCount: studentCount
+        studentCount: studentCount,
       },
-      students: studentsInClass
+      students: studentsInClass,
     });
-
   } catch (error) {
     console.error("❌ Error fetching class by ID:", error);
     return res.status(500).json({
       message: "Server error",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 const updateClass = async (req, res) => {
   try {
-    const { classId, name, code, subject, description, teacherId, startDate, endDate, isActive } = req.body;
+    const {
+      classId,
+      name,
+      code,
+      subject,
+      description,
+      teacherId,
+      startDate,
+      endDate,
+      isActive,
+    } = req.body;
 
     if (!classId) {
       return res.status(400).json({
-        message: "Class ID is required"
+        message: "Class ID is required",
       });
     }
 
     if (!mongoose.Types.ObjectId.isValid(classId)) {
       return res.status(400).json({
-        message: "Invalid Class ID format"
+        message: "Invalid Class ID format",
       });
     }
 
     const existingClass = await Class.findById(classId);
     if (!existingClass) {
       return res.status(404).json({
-        message: "Class not found"
+        message: "Class not found",
       });
     }
 
@@ -346,14 +284,14 @@ const updateClass = async (req, res) => {
       const newTeacher = await Teacher.findById(teacherId);
       if (!newTeacher) {
         return res.status(404).json({
-          message: "New teacher not found"
+          message: "New teacher not found",
         });
       }
 
       const oldTeacher = await Teacher.findById(existingClass.teacherId);
       if (oldTeacher) {
         oldTeacher.assignedClasses = oldTeacher.assignedClasses.filter(
-          classObjId => classObjId.toString() !== classId
+          (classObjId) => classObjId.toString() !== classId
         );
         await oldTeacher.save();
       }
@@ -366,9 +304,12 @@ const updateClass = async (req, res) => {
 
     if (code && code !== existingClass.code) {
       const existingClassWithCode = await Class.findOne({ code });
-      if (existingClassWithCode && existingClassWithCode._id.toString() !== classId) {
+      if (
+        existingClassWithCode &&
+        existingClassWithCode._id.toString() !== classId
+      ) {
         return res.status(400).json({
-          message: "Class code already exists"
+          message: "Class code already exists",
         });
       }
     }
@@ -387,17 +328,16 @@ const updateClass = async (req, res) => {
       classId,
       { $set: updateData },
       { new: true, runValidators: true }
-    ).populate('teacherId', 'fullName email phone profilePicture');
+    ).populate("teacherId", "fullName email phone profilePicture");
 
     return res.status(200).json({
       message: "Class updated successfully",
       class: updatedClass,
     });
-
   } catch (error) {
     return res.status(500).json({
       message: "Server error",
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -408,5 +348,5 @@ module.exports = {
   getAllClasses,
   getClassByID,
   updateClass,
-  deleteClass
+  deleteClass,
 };

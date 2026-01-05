@@ -7,17 +7,17 @@ const {
   getAllWaitlistStudent,
   getStudentById,
   getStudentNamesWithIds,
-  removeFromWaitlist,
+  removeFromStudentWaitlist,
   getStudentDashboardStats,
   updateStudentById,
-  deleteStudent
+  deleteStudent,
+  getParentChildById
 } = require("../controllers/StudentController");
 
 router.post("/createStudent", createStudent);
 router.post("/deleteStudent", deleteStudent);
 router.post("/addToWaitlist", addToWaitlist);
-router.post("/removeFromWaitlist/:studentId", removeFromWaitlist);
-
+router.post("/removeFromStudentWaitlist", removeFromStudentWaitlist);
 router.post("/getAllStudent", getAllStudent);
 router.post("/getAllWaitlistStudent", getAllWaitlistStudent);
 router.post("/getStudentById", getStudentById);
@@ -25,5 +25,6 @@ router.post("/getStudentNamesWithIds", getStudentNamesWithIds);
 router.post("/getStudentDashboardStats", getStudentDashboardStats);
 router.post("/getStudentDashboardStats", getStudentDashboardStats);
 router.post("/updateStudentById", updateStudentById);
+router.post("/getParentChildById", getParentChildById);
 
 module.exports = router;

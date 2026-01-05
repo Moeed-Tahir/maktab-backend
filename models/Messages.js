@@ -10,7 +10,7 @@ const messageSchema = new mongoose.Schema(
     senderModel: {
       type: String,
       required: true,
-      enum: ["User", "Admin", "Teacher", "Parent", "Student"], // Add "User"
+      enum: ["User", "Admin", "Teacher", "Parent", "Student", "SubAdmin"],
     },
     receiver: {
       type: mongoose.Schema.Types.ObjectId,
@@ -20,7 +20,7 @@ const messageSchema = new mongoose.Schema(
     receiverModel: {
       type: String,
       required: true,
-      enum: ["User", "Admin", "Teacher", "Parent", "Student"], // Add "User"
+      enum: ["User", "Admin", "Teacher", "Parent", "Student", "SubAdmin"],
     },
     subject: {
       type: String,
@@ -45,4 +45,5 @@ const messageSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-module.exports = mongoose.models.Messages || mongoose.model("Message", messageSchema);
+module.exports =
+  mongoose.models.Messages || mongoose.model("Message", messageSchema);

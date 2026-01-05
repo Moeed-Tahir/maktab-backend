@@ -33,7 +33,7 @@ const teacherSchema = new mongoose.Schema(
     qualification: String,
     specialization: String,
     experienceYears: {
-      type: String
+      type: String,
     },
     hireDate: {
       type: Date,
@@ -64,8 +64,13 @@ const teacherSchema = new mongoose.Schema(
       default: "Active",
     },
     languages: [String],
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Admin",
+    },
   },
   { timestamps: true }
 );
 
-module.exports = mongoose.models.Teacher || mongoose.model("Teacher", teacherSchema);
+module.exports =
+  mongoose.models.Teacher || mongoose.model("Teacher", teacherSchema);

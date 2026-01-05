@@ -6,19 +6,160 @@ const Admin = require("../models/Admin");
 const User = require("../models/User");
 const NotificationService = require("../services/NotificationServices");
 
+// const sendMessage = async (req, res) => {
+//   try {
+//     const {
+//       sender,
+//       senderModel,
+//       receiver,
+//       receiverModel,
+//       subject,
+//       message,
+//       attachments,
+//     } = req.body;
+
+//     if (!sender || !senderModel || !receiver || !receiverModel || !message) {
+//       return res.status(400).json({ message: "Missing required fields" });
+//     }
+
+//     const validModels = ["Admin", "Teacher", "Student", "Parent", "User","SubAdmin"];
+//     if (
+//       !validModels.includes(senderModel) ||
+//       !validModels.includes(receiverModel)
+//     ) {
+//       return res
+//         .status(400)
+//         .json({ message: "Invalid sender or receiver model" });
+//     }
+
+//     const newMessage = await Message.create({
+//       sender,
+//       senderModel,
+//       receiver,
+//       receiverModel,
+//       subject,
+//       message,
+//       attachments,
+//     });
+
+//     let populatedMessage;
+
+//     if (senderModel === "User" || receiverModel === "User") {
+//       populatedMessage = await Message.findById(newMessage._id);
+
+//       if (senderModel === "User") {
+//         const senderUser = await User.findById(sender).select("email role");
+//         populatedMessage.sender = {
+//           _id: senderUser._id,
+//           email: senderUser.email,
+//           role: senderUser.role,
+//           name: senderUser.role,
+//         };
+//       } else {
+//         populatedMessage.sender = await getModelById(senderModel, sender);
+//       }
+
+//       if (receiverModel === "User") {
+//         const receiverUser = await User.findById(receiver).select("email role");
+//         populatedMessage.receiver = {
+//           _id: receiverUser._id,
+//           email: receiverUser.email,
+//           role: receiverUser.role,
+//           name: receiverUser.role,
+//         };
+//       } else {
+//         populatedMessage.receiver = await getModelById(receiverModel, receiver);
+//       }
+//     } else {
+//       populatedMessage = await Message.findById(newMessage._id)
+//         .populate("sender", "fullName name email")
+//         .populate("receiver", "fullName name email");
+//     }
+
+//     let senderName = "User";
+//     if (populatedMessage.sender) {
+//       senderName =
+//         populatedMessage.sender.name ||
+//         populatedMessage.sender.fullName ||
+//         populatedMessage.sender.studentName ||
+//         populatedMessage.sender.role ||
+//         "User";
+//     }
+
+//     try {
+//       await NotificationService.addToCombinedNotification(
+//         receiver,
+//         receiverModel,
+//         {
+//           title: "New Message Received",
+//           message: `From ${senderName}: ${
+//             subject || message.substring(0, 100)
+//           }${message.length > 100 ? "..." : ""}`,
+//           type: "message",
+//           relatedEntity: {
+//             entityType: "Message",
+//             entityId: newMessage._id,
+//             sender: sender,
+//             senderModel: senderModel,
+//           },
+//           actionUrl: `/messages/conversation?sender=${sender}&senderModel=${senderModel}&receiver=${receiver}&receiverModel=${receiverModel}`,
+//           priority: "high",
+//         }
+//       );
+//       console.log(`✓ Notification sent to ${receiverModel} ${receiver}`);
+//     } catch (notificationError) {
+//       console.error("✗ Failed to send notification:", notificationError);
+//     }
+
+//     res.status(201).json({
+//       message: "Message sent successfully",
+//       data: populatedMessage,
+//     });
+//   } catch (error) {
+//     console.error("Send Message Error:", error);
+//     res.status(500).json({
+//       message: "Server error while sending message",
+//       error: error.message,
+//     });
+//   }
+// };
+
 const sendMessage = async (req, res) => {
   try {
-    const { sender, senderModel, receiver, receiverModel, subject, message, attachments } = req.body;
+    const {
+      sender,
+      senderModel,
+      receiver,
+      receiverModel,
+      subject,
+      message,
+      attachments,
+    } = req.body;
 
+    // 1️⃣ Validate required fields
     if (!sender || !senderModel || !receiver || !receiverModel || !message) {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
-    const validModels = ["Admin", "Teacher", "Student", "Parent", "User"];
-    if (!validModels.includes(senderModel) || !validModels.includes(receiverModel)) {
-      return res.status(400).json({ message: "Invalid sender or receiver model" });
+    // 2️⃣ Validate models
+    const validModels = [
+      "Admin",
+      "Teacher",
+      "Student",
+      "Parent",
+      "User",
+      "SubAdmin",
+    ];
+    if (
+      !validModels.includes(senderModel) ||
+      !validModels.includes(receiverModel)
+    ) {
+      return res
+        .status(400)
+        .json({ message: "Invalid sender or receiver model" });
     }
 
+    // 3️⃣ Create the message
     const newMessage = await Message.create({
       sender,
       senderModel,
@@ -29,81 +170,87 @@ const sendMessage = async (req, res) => {
       attachments,
     });
 
-    let populatedMessage;
-    
-    if (senderModel === "User" || receiverModel === "User") {
-      populatedMessage = await Message.findById(newMessage._id);
-      
-      if (senderModel === "User") {
-        const senderUser = await User.findById(sender).select("email role");
-        populatedMessage.sender = {
-          _id: senderUser._id,
-          email: senderUser.email,
-          role: senderUser.role,
-          name: senderUser.role 
+    // Helper function to get model details
+    const getEntityDetails = async (model, id) => {
+      if (model === "User") {
+        const user = await User.findById(id).select("email role");
+        return {
+          _id: user._id,
+          email: user.email,
+          role: user.role,
+          name: user.role,
         };
-      } else {
-        populatedMessage.sender = await getModelById(senderModel, sender);
       }
-      
-      if (receiverModel === "User") {
-        const receiverUser = await User.findById(receiver).select("email role");
-        populatedMessage.receiver = {
-          _id: receiverUser._id,
-          email: receiverUser.email,
-          role: receiverUser.role,
-          name: receiverUser.role
-        };
-      } else {
-        populatedMessage.receiver = await getModelById(receiverModel, receiver);
+      if (model === "SubAdmin") {
+        // Find subAdmin inside parent Admin
+        const parentAdmin = await Admin.findOne(
+          { "subAdmins._id": id },
+          { "subAdmins.$": 1 }
+        );
+        if (parentAdmin) {
+          const sub = parentAdmin.subAdmins[0];
+          return {
+            _id: sub._id,
+            name: sub.name,
+            email: sub.email,
+            role: "SubAdmin",
+          };
+        }
+        return null;
       }
-    } else {
-      populatedMessage = await Message.findById(newMessage._id)
-        .populate("sender", "fullName name email")
-        .populate("receiver", "fullName name email");
-    }
+      // Other models
+      return getModelById(model, id);
+    };
 
-    let senderName = 'User';
-    if (populatedMessage.sender) {
-      senderName = populatedMessage.sender.name || 
-                  populatedMessage.sender.fullName || 
-                  populatedMessage.sender.studentName || 
-                  populatedMessage.sender.role || 
-                  'User';
-    }
+    // 4️⃣ Populate sender and receiver
+    const populatedMessage = await Message.findById(newMessage._id);
+    populatedMessage.sender = await getEntityDetails(senderModel, sender);
+    populatedMessage.receiver = await getEntityDetails(receiverModel, receiver);
 
+    // 5️⃣ Determine sender name for notification
+    const senderName =
+      populatedMessage.sender?.name ||
+      populatedMessage.sender?.fullName ||
+      populatedMessage.sender?.studentName ||
+      populatedMessage.sender?.role ||
+      "User";
+
+    // 6️⃣ Send notification
     try {
       await NotificationService.addToCombinedNotification(
         receiver,
         receiverModel,
         {
-          title: 'New Message Received',
-          message: `From ${senderName}: ${subject || message.substring(0, 100)}${message.length > 100 ? '...' : ''}`,
-          type: 'message',
-          relatedEntity: { 
-            entityType: 'Message', 
+          title: "New Message Received",
+          message: `From ${senderName}: ${
+            subject || message.substring(0, 100)
+          }${message.length > 100 ? "..." : ""}`,
+          type: "message",
+          relatedEntity: {
+            entityType: "Message",
             entityId: newMessage._id,
-            sender: sender,
-            senderModel: senderModel
+            sender,
+            senderModel,
           },
           actionUrl: `/messages/conversation?sender=${sender}&senderModel=${senderModel}&receiver=${receiver}&receiverModel=${receiverModel}`,
-          priority: 'high'
+          priority: "high",
         }
       );
       console.log(`✓ Notification sent to ${receiverModel} ${receiver}`);
     } catch (notificationError) {
-      console.error('✗ Failed to send notification:', notificationError);
+      console.error("✗ Failed to send notification:", notificationError);
     }
 
-    res.status(201).json({ 
-      message: "Message sent successfully", 
-      data: populatedMessage 
+    // 7️⃣ Respond with populated message
+    res.status(201).json({
+      message: "Message sent successfully",
+      data: populatedMessage,
     });
   } catch (error) {
     console.error("Send Message Error:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       message: "Server error while sending message",
-      error: error.message 
+      error: error.message,
     });
   }
 };
@@ -124,7 +271,7 @@ const getModelById = async (modelType, id) => {
         _id: user._id,
         email: user.email,
         role: user.role,
-        name: user.role
+        name: user.role,
       };
     default:
       return null;
@@ -135,27 +282,31 @@ const populateMessages = async (messages) => {
   return await Promise.all(
     messages.map(async (message) => {
       const populatedMessage = message.toObject();
-      
+
       if (message.senderModel === "User") {
-        const senderUser = await User.findById(message.sender).select("email role");
+        const senderUser = await User.findById(message.sender).select(
+          "email role"
+        );
         populatedMessage.sender = {
           _id: senderUser._id,
           email: senderUser.email,
           role: senderUser.role,
-          name: senderUser.role
+          name: senderUser.role,
         };
       }
-      
+
       if (message.receiverModel === "User") {
-        const receiverUser = await User.findById(message.receiver).select("email role");
+        const receiverUser = await User.findById(message.receiver).select(
+          "email role"
+        );
         populatedMessage.receiver = {
           _id: receiverUser._id,
           email: receiverUser.email,
           role: receiverUser.role,
-          name: receiverUser.role
+          name: receiverUser.role,
         };
       }
-      
+
       return populatedMessage;
     })
   );
@@ -165,11 +316,11 @@ const getInbox = async (req, res) => {
   try {
     const { userId, userModel } = req.body;
 
-    const messages = await Message.find({ 
+    const messages = await Message.find({
       $or: [
         { receiver: userId, receiverModel: userModel },
-        { sender: userId, senderModel: userModel }
-      ]
+        { sender: userId, senderModel: userModel },
+      ],
     }).sort({ createdAt: -1 });
 
     const populatedMessages = await populateMessages(messages);
@@ -195,26 +346,26 @@ const getConversation = async (req, res) => {
           sender: user1Id,
           senderModel: user1Model,
           receiver: user2Id,
-          receiverModel: user2Model
+          receiverModel: user2Model,
         },
         {
           sender: user2Id,
           senderModel: user2Model,
           receiver: user1Id,
-          receiverModel: user1Model
-        }
-      ]
+          receiverModel: user1Model,
+        },
+      ],
     }).sort({ createdAt: 1 });
 
     const populatedMessages = await populateMessages(messages);
 
-    res.status(200).json({ 
+    res.status(200).json({
       message: "Conversation retrieved successfully",
       data: populatedMessages,
       participants: {
         user1: { id: user1Id, model: user1Model },
-        user2: { id: user2Id, model: user2Model }
-      }
+        user2: { id: user2Id, model: user2Model },
+      },
     });
   } catch (error) {
     console.error("Get Conversation Error:", error);
@@ -233,25 +384,36 @@ const getUserConversations = async (req, res) => {
     const allMessages = await Message.find({
       $or: [
         { sender: userId, senderModel: userModel },
-        { receiver: userId, receiverModel: userModel }
-      ]
+        { receiver: userId, receiverModel: userModel },
+      ],
     }).sort({ createdAt: -1 });
 
     const populatedMessages = await populateMessages(allMessages);
 
     const conversationsMap = new Map();
 
-    populatedMessages.forEach(message => {
+    populatedMessages.forEach((message) => {
       let participantId, participantModel, participantName;
-      
-      if (message.sender._id.toString() === userId && message.senderModel === userModel) {
+
+      if (
+        message.sender._id.toString() === userId &&
+        message.senderModel === userModel
+      ) {
         participantId = message.receiver._id.toString();
         participantModel = message.receiverModel;
-        participantName = message.receiver.name || message.receiver.role || message.receiver.fullName || `${message.receiverModel} User`;
+        participantName =
+          message.receiver.name ||
+          message.receiver.role ||
+          message.receiver.fullName ||
+          `${message.receiverModel} User`;
       } else {
         participantId = message.sender._id.toString();
         participantModel = message.senderModel;
-        participantName = message.sender.name || message.sender.role || message.sender.fullName || `${message.senderModel} User`;
+        participantName =
+          message.sender.name ||
+          message.sender.role ||
+          message.sender.fullName ||
+          `${message.senderModel} User`;
       }
 
       const participantKey = `${participantId}-${participantModel}`;
@@ -264,7 +426,7 @@ const getUserConversations = async (req, res) => {
           lastMessage: message.message,
           lastMessageTime: message.createdAt,
           unreadCount: 0,
-          messages: []
+          messages: [],
         });
       }
 
@@ -280,9 +442,9 @@ const getUserConversations = async (req, res) => {
       (a, b) => new Date(b.lastMessageTime) - new Date(a.lastMessageTime)
     );
 
-    res.status(200).json({ 
+    res.status(200).json({
       message: "Conversations retrieved successfully",
-      data: conversations
+      data: conversations,
     });
   } catch (error) {
     console.error("Get User Conversations Error:", error);
@@ -300,12 +462,15 @@ const markAsRead = async (req, res) => {
       { new: true }
     );
 
-    if (!updatedMessage) return res.status(404).json({ message: "Message not found" });
+    if (!updatedMessage)
+      return res.status(404).json({ message: "Message not found" });
 
     // Manually populate the updated message
     const populatedMessage = await populateMessages([updatedMessage]);
 
-    res.status(200).json({ message: "Message marked as read", data: populatedMessage[0] });
+    res
+      .status(200)
+      .json({ message: "Message marked as read", data: populatedMessage[0] });
   } catch (error) {
     console.error("Mark As Read Error:", error);
     res.status(500).json({ message: "Server error" });
@@ -326,14 +491,14 @@ const markConversationAsRead = async (req, res) => {
         senderModel: participantModel,
         receiver: userId,
         receiverModel: userModel,
-        isRead: false
+        isRead: false,
       },
       { isRead: true }
     );
 
-    res.status(200).json({ 
-      message: "Conversation marked as read", 
-      data: { modifiedCount: result.modifiedCount }
+    res.status(200).json({
+      message: "Conversation marked as read",
+      data: { modifiedCount: result.modifiedCount },
     });
   } catch (error) {
     console.error("Mark Conversation As Read Error:", error);
@@ -351,7 +516,8 @@ const deleteMessage = async (req, res) => {
       { new: true }
     );
 
-    if (!deletedMessage) return res.status(404).json({ message: "Message not found" });
+    if (!deletedMessage)
+      return res.status(404).json({ message: "Message not found" });
 
     res.status(200).json({ message: "Message deleted", data: deletedMessage });
   } catch (error) {
@@ -363,159 +529,182 @@ const deleteMessage = async (req, res) => {
 const getUsersData = async (req, res) => {
   try {
     const { role, id } = req.body;
+    console.log("role", role, "adminId", id);
 
     if (!role) {
       return res.status(400).json({ message: "Role is required" });
+    }
+
+    if (!id) {
+      return res.status(400).json({ message: "Admin ID is required" });
     }
 
     let users = [];
 
     switch (role.toLowerCase()) {
       case "teacher":
-        if (id) {
-          const teacher = await Teacher.findById(id).select("fullName email phone status assignedClasses");
-          
-          if (!teacher) {
-            users = [];
-          } else {
-            const students = await Student.find({
-              classes: { $in: teacher.assignedClasses }
-            }).select("studentName email phone address enrollDate classes");
+        const teacherAdminExists = await Admin.findById(id);
+        if (!teacherAdminExists) {
+          return res.status(404).json({ message: "Admin not found" });
+        }
 
-            const studentsWithClassDetails = await Promise.all(
-              students.map(async (student) => {
-                const classDetails = await Class.find({
-                  _id: { $in: student.classes },
-                  teacherId: id
-                }).select("name subject");
-                
-                return {
-                  ...student.toObject(),
-                  assignedClasses: classDetails
-                };
-              })
-            );
+        users = await Teacher.find({ createdBy: id }).select(
+          "fullName email phone status"
+        );
 
-            users = [{
-              teacher: {
-                _id: teacher._id,
-                fullName: teacher.fullName,
-                email: teacher.email,
-                phone: teacher.phone,
-                status: teacher.status
-              },
-              assignedStudents: studentsWithClassDetails
-            }];
-          }
-        } else {
-          users = await Teacher.find().select("fullName email phone status");
+        if (users.length > 0) {
+          users = await Promise.all(
+            users.map(async (teacher) => {
+              const students = await Student.find({
+                classes: { $in: teacher.assignedClasses },
+                createdBy: id,
+              }).select("studentName email");
+
+              return {
+                ...teacher.toObject(),
+                studentCount: students.length,
+                assignedStudents: students,
+              };
+            })
+          );
         }
         break;
 
       case "student":
-        users = await Student.find().select("studentName email phone address enrollDate");
+        const studentAdminExists = await Admin.findById(id);
+        if (!studentAdminExists) {
+          return res.status(404).json({ message: "Admin not found" });
+        }
+
+        users = await Student.find({ createdBy: id })
+          .select("studentName email phone address enrollDate classes parent")
+          .populate({
+            path: "parent",
+            select: "fullName phone email",
+          });
         break;
 
       case "parent":
-        if (id) {
-          const parent = await Parent.findById(id)
-            .select("fullName email phone address identityNumber")
-            .populate({
-              path: 'students',
-              select: 'studentName email phone address enrollDate classes'
-            });
-
-          if (!parent) {
-            users = [];
-          } else {
-            const parentWithStudentDetails = await Promise.all(
-              parent.students.map(async (student) => {
-                const classDetails = await Class.find({
-                  _id: { $in: student.classes }
-                }).select("name subject teacherId");
-
-                const classesWithTeachers = await Promise.all(
-                  classDetails.map(async (classObj) => {
-                    const teacher = await Teacher.findById(classObj.teacherId)
-                      .select("fullName email phone");
-                    return {
-                      class: {
-                        _id: classObj._id,
-                        name: classObj.name,
-                        subject: classObj.subject
-                      },
-                      teacher: teacher
-                    };
-                  })
-                );
-
-                return {
-                  ...student.toObject(),
-                  classesWithTeachers: classesWithTeachers
-                };
-              })
-            );
-
-            users = [{
-              parent: {
-                _id: parent._id,
-                fullName: parent.fullName,
-                email: parent.email,
-                phone: parent.phone,
-                address: parent.address,
-                identityNumber: parent.identityNumber
-              },
-              children: parentWithStudentDetails
-            }];
-          }
-        } else {
-          users = await Parent.find()
-            .select("fullName email phone address identityNumber")
-            .populate({
-              path: 'students',
-              select: 'studentName email'
-            });
+        const parentAdminExists = await Admin.findById(id);
+        if (!parentAdminExists) {
+          return res.status(404).json({ message: "Admin not found" });
         }
+
+        users = await Parent.find({ createdBy: id })
+          .select("fullName email phone address identityNumber")
+          .populate({
+            path: "students",
+            match: { createdBy: id },
+            select: "studentName email phone classes",
+            populate: {
+              path: "classes",
+              select: "name subject",
+            },
+          });
         break;
 
       case "admin":
-        users = await Admin.find().select("name email phone address");
+        if (id === "super_admin_all_admins") {
+          users = await Admin.find({})
+            .select("name email phone address subAdmins createdAt lastLogin")
+            .sort({ createdAt: -1 });
+        } else {
+          const adminExists = await Admin.findById(id);
+          if (!adminExists) {
+            return res.status(404).json({ message: "Admin not found" });
+          }
+
+          const admin = await Admin.findById(id).select(
+            "name email phone address subAdmins"
+          );
+          if (admin) {
+            users = [admin];
+          } else {
+            users = [];
+          }
+        }
         break;
 
-      case "super admin":
-        users = await User.find({ role: "Super Admin" }).select("email role");
-        users = users.map(user => ({
-          _id: user._id,
-          name: user.role,
-          email: user.email,
-          role: user.role
+      case "subadmin":
+        const adminWithSubs = await Admin.findById(id);
+        if (!adminWithSubs) {
+          return res.status(404).json({ message: "Admin not found" });
+        }
+
+        users = adminWithSubs.subAdmins.map((sub) => ({
+          subAdmin: {
+            _id: sub._id,
+            name: sub.name,
+            email: sub.email,
+            phone: sub.phone,
+            photo: sub.photo,
+            isActive: sub.isActive,
+            permissions: sub.permissions,
+          },
+          parentAdmin: {
+            _id: adminWithSubs._id,
+            name: adminWithSubs.name,
+            email: adminWithSubs.email,
+          },
         }));
+        break;
+
+      case "superadmin":
+        if (id === "get_superadmin") {
+          users = await User.find({ role: "Super Admin" }).select(
+            "name email role"
+          );
+          users = users.map((user) => ({
+            _id: user._id,
+            name: user.name || "Super Admin",
+            email: user.email,
+            role: user.role,
+          }));
+        } else {
+          const superAdminExists = await User.findById(id);
+          if (!superAdminExists) {
+            return res.status(404).json({ message: "Super Admin not found" });
+          }
+
+          users = await User.find({ role: "Super Admin" }).select(
+            "name email role"
+          );
+          users = users.map((user) => ({
+            _id: user._id,
+            name: user.name || "Super Admin",
+            email: user.email,
+            role: user.role,
+          }));
+        }
         break;
 
       default:
         return res.status(400).json({ message: "Invalid role provided" });
     }
 
-    // If users is null or undefined, set it to empty array
-    if (!users) {
+    if (!users || !Array.isArray(users)) {
       users = [];
     }
 
-    res.status(200).json({ role, count: users.length, data: users });
-
+    res.status(200).json({
+      role,
+      adminId: id,
+      count: users.length,
+      data: users,
+    });
   } catch (error) {
     console.error("Get Users Data Error:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
 
-module.exports = { 
-  sendMessage, 
-  getInbox, 
-  getConversation, 
+module.exports = {
+  sendMessage,
+  getInbox,
+  getConversation,
   getUserConversations,
-  markAsRead, 
+  markAsRead,
   markConversationAsRead,
   deleteMessage,
-  getUsersData 
+  getUsersData,
 };

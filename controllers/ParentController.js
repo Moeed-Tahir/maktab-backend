@@ -8,6 +8,7 @@ const Payment = require("../models/Payments");
 const mongoose = require("mongoose");
 const Attendance = require("../models/Attendance");
 const Event = require("../models/Event");
+const Admin = require("../models/Admin");
 
 const calculateNextPaymentDate = (frequency) => {
   const date = new Date();
@@ -31,217 +32,80 @@ const createParent = async (req, res) => {
   let stripeCustomer;
 
   try {
-    const { parent: parentData, children: childrenData } = req.body;
-
-    if (!parentData || !childrenData || childrenData.length === 0) {
-      return res.status(400).json({
-        message: "Parent and at least one child data are required"
-      });
+    const { adminId, parent: parentData, children } = req.body;
+    
+    if (!adminId) return res.status(400).json({ message: "adminId is required" });
+    
+    const adminExists = await Admin.findById(adminId);
+    if (!adminExists) return res.status(404).json({ message: "Admin not found" });
+    
+    if (!parentData || !children?.length) {
+      return res.status(400).json({ message: "Parent & at least one child required" });
     }
 
-    const {
-      fullName,
-      address,
-      phone,
-      spouse,
-      spousePhone,
-      emergencyPhone,
-      addToWaitList: parentWaitList,
-      email: parentEmail,
-      password: parentPassword,
-      identityNumber,
-      paymentMethodId,
-      cardDetails,
-      recurringEnabled = false,
-      recurringFrequency = "monthly",
-    } = parentData;
+    const child = children[0];
 
-    const firstChild = childrenData[0];
-    const {
-      studentName,
-      phone: studentPhone,
-      address: studentAddress,
-      addToWaitList: studentWaitList,
-      dateOfBirth,
-      gender,
-      enrollDate,
-      fee,
-      email: studentEmail,
-      password: studentPassword,
-      class: studentClass,
-    } = firstChild;
+    const hashedParentPassword = await bcrypt.hash(parentData.password, 10);
+    const hashedStudentPassword = await bcrypt.hash(child.password, 10);
 
-    if (!parentPassword || !studentPassword || !paymentMethodId) {
-      return res.status(400).json({
-        message: "Parent & student passwords and payment method are required"
-      });
-    }
+    stripeCustomer = await stripe.customers.create({
+      name: parentData.fullName,
+      email: parentData.email,
+      phone: parentData.phone,
+      address: { line1: parentData.address },
+    });
 
-    const existingParent = await Parent.findOne({ email: parentEmail });
-    if (existingParent) return res.status(400).json({ message: "Parent email exists" });
+    await stripe.paymentMethods.attach(parentData.paymentMethodId, { customer: stripeCustomer.id });
 
-    const existingStudent = await Student.findOne({ email: studentEmail });
-    if (existingStudent) return res.status(400).json({ message: "Student email exists" });
-
-    const hashedParentPassword = await bcrypt.hash(parentPassword, 10);
-    const hashedStudentPassword = await bcrypt.hash(studentPassword, 10);
-
-    try {
-      stripeCustomer = await stripe.customers.create({
-        name: fullName,
-        email: parentEmail,
-        phone,
-        address: { line1: address },
-        metadata: { parentIdentity: identityNumber },
-      });
-
-      await stripe.paymentMethods.attach(paymentMethodId, { customer: stripeCustomer.id });
-      await stripe.customers.update(stripeCustomer.id, {
-        invoice_settings: { default_payment_method: paymentMethodId },
-      });
-    } catch (stripeError) {
-      console.error("Stripe error:", stripeError);
-      return res.status(400).json({ message: `Stripe error: ${stripeError.message}` });
-    }
-
-    const parentUser = await User.create({ email: parentEmail, password: hashedParentPassword, role: "Parent" });
-    const studentUser = await User.create({ email: studentEmail, password: hashedStudentPassword, role: "Student" });
-
-    const parent = new Parent({
-      fullName,
-      address,
-      phone,
-      spouse,
-      spousePhone,
-      emergencyPhone,
-      addToWaitList: parentWaitList,
-      email: parentEmail,
+    const parentUser = await User.create({
+      email: parentData.email,
       password: hashedParentPassword,
-      identityNumber,
+      role: "Parent",
+      createdBy: adminId
+    });
+
+    const studentUser = await User.create({
+      email: child.email,
+      password: hashedStudentPassword,
+      role: "Student",
+      createdBy: adminId
+    });
+
+    const parent = await Parent.create({
+      ...parentData,
+      password: hashedParentPassword,
       user: parentUser._id,
+      createdBy: adminId,
       cardDetail: {
         stripeCustomerId: stripeCustomer.id,
-        defaultPaymentMethodId: paymentMethodId,
-        paymentMethods: [{
-          paymentMethodId,
-          cardBrand: cardDetails.brand,
-          last4: cardDetails.last4,
-          expMonth: cardDetails.expMonth,
-          expYear: cardDetails.expYear,
-          isDefault: true,
-        }],
-      },
-      recurringPayment: {
-        enabled: recurringEnabled,
-        nextPaymentDate: recurringEnabled ? calculateNextPaymentDate(recurringFrequency) : null,
-        frequency: recurringFrequency,
+        defaultPaymentMethodId: parentData.paymentMethodId,
       },
     });
-    await parent.save();
 
-    const student = new Student({
-      studentName,
-      phone: studentPhone,
-      address: studentAddress,
-      addToWaitList: studentWaitList,
-      dateOfBirth,
-      gender,
-      enrollDate,
-      fee,
-      class: studentClass,
-      email: studentEmail,
+    const student = await Student.create({
+      studentName: child.studentName,
+      address: child.address,
+      phone: child.phone,
+      email: child.email,
       password: hashedStudentPassword,
+      classes: [child.class],
       parent: parent._id,
       user: studentUser._id,
+      createdBy: adminId,
     });
-    await student.save();
 
     parent.students.push(student._id);
     await parent.save();
 
-    let paymentResult = null;
-    try {
-      const amountInCents = Math.round(fee * 100);
-      
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: amountInCents,
-        currency: "USD",
-        customer: stripeCustomer.id,
-        payment_method: paymentMethodId,
-        off_session: true,
-        confirm: true,
-        metadata: {
-          studentId: student._id.toString(),
-          studentName: studentName,
-          type: "initial_enrollment"
-        }
-      });
-
-      const payment = new Payment({
-        parent: parent._id,
-        student: student._id,
-        invoiceNumber: `INIT-${Date.now()}`,
-        amount: fee,
-        currency: "USD",
-        paymentMethod: {
-          paymentMethodId: paymentMethodId,
-          cardBrand: cardDetails.brand,
-          last4: cardDetails.last4,
-          expMonth: cardDetails.expMonth,
-          expYear: cardDetails.expYear
-        },
-        stripePaymentIntentId: paymentIntent.id,
-        status: paymentIntent.status,
-        description: `Initial enrollment fee for ${studentName}`,
-        metadata: {
-          studentName: studentName,
-          type: "initial_enrollment"
-        }
-      });
-      await payment.save();
-
-      paymentResult = {
-        id: payment._id,
-        amount: payment.amount,
-        status: payment.status,
-        paymentDate: payment.paymentDate
-      };
-
-    } catch (stripePaymentError) {
-      console.error("Stripe payment error:", stripePaymentError);
-      paymentResult = {
-        error: stripePaymentError.message,
-        status: "failed"
-      };
-    }
-
     return res.status(201).json({
-      message: "Parent and Student created successfully.",
-      parent: {
-        id: parent._id,
-        fullName: parent.fullName,
-        email: parent.email,
-        stripeCustomerId: parent.cardDetail.stripeCustomerId,
-        recurringPayment: parent.recurringPayment
-      },
-      student: {
-        id: student._id,
-        studentName: student.studentName,
-        email: student.email,
-        fee: student.fee
-      },
-      payment: paymentResult
+      message: "Parent & Student created successfully",
+      parent,
+      student,
     });
 
   } catch (error) {
-    console.error("❌ Error creating parent:", error);
-    if (stripeCustomer && stripeCustomer.id) {
-      try {
-        await stripe.customers.del(stripeCustomer.id);
-      } catch (cleanupError) {
-        console.error("Stripe cleanup error:", cleanupError);
-      }
-    }
+    if (stripeCustomer) await stripe.customers.del(stripeCustomer.id);
+    console.error("❌ createParent:", error);
     return res.status(500).json({ message: error.message });
   }
 };
@@ -297,8 +161,16 @@ const getAllParents = async (req, res) => {
       limit = 10,
       search = "",
       sortBy = "createdAt",
-      sortOrder = "desc"
+      sortOrder = "desc",
+      adminId
     } = req.body;
+
+    if (!adminId) {
+      return res.status(400).json({
+        success: false,
+        message: "Admin ID is required"
+      });
+    }
 
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
@@ -315,7 +187,8 @@ const getAllParents = async (req, res) => {
 
     const filterQuery = {
       ...searchQuery,
-      addToWaitList: false
+      addToWaitList: false,
+      createdBy: adminId
     };
 
     const total = await Parent.countDocuments(filterQuery);
@@ -356,8 +229,16 @@ const getAllWaitlistParents = async (req, res) => {
       limit = 10,
       search = "",
       sortBy = "createdAt",
-      sortOrder = "desc"
+      sortOrder = "desc",
+      adminId
     } = req.body;
+
+    if (!adminId) {
+      return res.status(400).json({
+        success: false,
+        message: "Admin ID is required"
+      });
+    }
 
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
@@ -374,7 +255,8 @@ const getAllWaitlistParents = async (req, res) => {
 
     const filterQuery = {
       ...searchQuery,
-      addToWaitList: true
+      addToWaitList: true,
+      createdBy: adminId
     };
 
     const total = await Parent.countDocuments(filterQuery);
@@ -399,6 +281,35 @@ const getAllWaitlistParents = async (req, res) => {
 
   } catch (error) {
     console.error("Error fetching waitlist parents:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+
+const getAllParentsWithStudents = async (req, res) => {
+  try {
+    const { adminId } = req.body;
+
+    if (!adminId) {
+      return res.status(400).json({
+        success: false,
+        message: "Admin ID is required"
+      });
+    }
+
+    const parents = await Parent.find({ createdBy: adminId })
+      .populate("students", "studentName _id")
+      .select("_id fullName");
+
+    return res.status(200).json({
+      success: true,
+      data: parents
+    });
+
+  } catch (error) {
+    console.error("Error fetching parents with students:", error);
     return res.status(500).json({
       success: false,
       message: "Internal server error"
@@ -745,26 +656,6 @@ const processCardPayment = async (req, res) => {
 
     return res.status(500).json({
       message: error.message
-    });
-  }
-};
-
-const getAllParentsWithStudents = async (req, res) => {
-  try {
-    const parents = await Parent.find()
-      .populate("students", "studentName _id")
-      .select("_id fullName");
-
-    return res.status(200).json({
-      success: true,
-      data: parents
-    });
-
-  } catch (error) {
-    console.error("Error fetching parents with students:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error"
     });
   }
 };
@@ -1260,7 +1151,7 @@ const getRecentPayments = async (parentId) => {
       status: "succeeded"
     })
       .populate("student", "studentName")
-      .sort({ paymentDate: -1 }) 
+      .sort({ paymentDate: -1 })
       .limit(4)
       .lean();
 
@@ -1519,4 +1410,3 @@ module.exports = {
   processRecurringPayments,
   deleteParent
 };
-

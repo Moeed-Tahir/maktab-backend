@@ -8,11 +8,29 @@ const Attendance = require("../models/Attendance");
 const Timetable = require("../models/TimeTable");
 const Assignment = require("../models/Assignment");
 const Payment = require("../models/Payments");
+const Admin = require("../models/Admin");
 
 const mongoose = require("mongoose");
 
 const createStudent = async (req, res) => {
   try {
+    const { adminId } = req.body;
+
+    if (!adminId) {
+      return res.status(400).json({
+        success: false,
+        message: "adminId is required",
+      });
+    }
+
+    const adminExists = await Admin.findById(adminId);
+    if (!adminExists) {
+      return res.status(404).json({
+        success: false,
+        message: "Admin not found",
+      });
+    }
+
     const {
       fullName,
       address,
@@ -24,7 +42,6 @@ const createStudent = async (req, res) => {
       email: parentEmail,
       password: parentPassword,
       identityNumber,
-
       studentName,
       studentPhone,
       studentAddress,
@@ -38,80 +55,57 @@ const createStudent = async (req, res) => {
       class: studentClass,
     } = req.body;
 
-    const existingStudent = await Student.findOne({ email: studentEmail });
-    if (existingStudent) {
+    if (await Student.findOne({ email: studentEmail })) {
       return res.status(400).json({
-        message: "Student with this email already exists."
+        success: false,
+        message: "Student already exists",
       });
     }
 
     const classExists = await Class.findById(studentClass);
     if (!classExists) {
       return res.status(404).json({
-        message: "Class not found."
+        success: false,
+        message: "Class not found",
       });
     }
 
-    let parent = await Parent.findOne({ identityNumber });
-
     const hashedStudentPassword = await bcrypt.hash(studentPassword, 10);
+
+    let parent = await Parent.findOne({ identityNumber });
 
     const studentUser = await User.create({
       email: studentEmail,
       password: hashedStudentPassword,
       role: "Student",
+      createdBy: adminId,
     });
 
-    if (parent) {
-      const student = await Student.create({
-        studentName,
-        phone: studentPhone,
-        address: studentAddress,
-        addToWaitList: studentWaitList,
-        dateOfBirth,
-        gender,
-        enrollDate,
-        fee,
-        classes: studentClass,
-        email: studentEmail,
-        password: hashedStudentPassword,
-        parent: parent._id,
-        user: studentUser._id,
+    if (!parent) {
+      const hashedParentPassword = await bcrypt.hash(parentPassword, 10);
+
+      const parentUser = await User.create({
+        email: parentEmail,
+        password: hashedParentPassword,
+        role: "Parent",
+        createdBy: adminId,
       });
 
-      parent.students.push(student._id);
-      await parent.save();
-
-      return res.status(200).json({
-        message: "Existing parent found. Linked new student.",
-        parent,
-        student,
-        existingParent: true,
+      parent = await Parent.create({
+        fullName,
+        address,
+        phone,
+        spouse,
+        spousePhone,
+        emergencyPhone,
+        addToWaitList: parentWaitList,
+        email: parentEmail,
+        password: hashedParentPassword,
+        identityNumber,
+        user: parentUser._id,
+        createdBy: adminId,
       });
     }
-
-    // Create new parent and link
-    const hashedParentPassword = await bcrypt.hash(parentPassword, 10);
-
-    const parentUser = await User.create({
-      email: parentEmail,
-      password: hashedParentPassword,
-      role: "Parent",
-    });
-
-    parent = await Parent.create({
-      fullName,
-      address,
-      phone,
-      spouse,
-      spousePhone,
-      emergencyPhone,
-      addToWaitList: parentWaitList,
-      email: parentEmail,
-      password: hashedParentPassword,
-      identityNumber,
-      user: parentUser._id,
-    });
 
     const student = await Student.create({
       studentName,
@@ -122,25 +116,47 @@ const createStudent = async (req, res) => {
       gender,
       enrollDate,
       fee,
-      classes: studentClass,
+      classes: [studentClass],
       email: studentEmail,
       password: hashedStudentPassword,
       parent: parent._id,
       user: studentUser._id,
+      createdBy: adminId,
     });
 
     parent.students.push(student._id);
     await parent.save();
 
     return res.status(201).json({
-      message: "New student and parent created successfully.",
-      student,
-      parent,
-      existingParent: false,
+      success: true,
+      message: "Student created successfully",
+      data: {
+        student: {
+          ...student._doc,
+          password: undefined,
+        },
+        parent: {
+          ...parent._doc,
+          password: undefined,
+        },
+      },
     });
   } catch (error) {
-    console.error("❌ Error creating student:", error);
-    return res.status(500).json({ message: error.message });
+    console.error("❌ createStudent error:", error);
+
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: Object.values(error.errors).map((err) => err.message),
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
   }
 };
 
@@ -148,7 +164,9 @@ const deleteStudent = async (req, res) => {
   try {
     const { studentId } = req.body;
 
-    const student = await Student.findById(studentId).populate("parent").populate("user");
+    const student = await Student.findById(studentId)
+      .populate("parent")
+      .populate("user");
     if (!student) {
       return res.status(404).json({ message: "Student not found" });
     }
@@ -158,7 +176,7 @@ const deleteStudent = async (req, res) => {
 
     if (parent) {
       parent.students = parent.students.filter(
-        studId => studId.toString() !== studentId
+        (studId) => studId.toString() !== studentId
       );
       await parent.save();
     }
@@ -173,39 +191,41 @@ const deleteStudent = async (req, res) => {
 
     return res.status(200).json({
       message: "Student and all related data deleted successfully.",
-      deletedStudentId: studentId
+      deletedStudentId: studentId,
     });
-
   } catch (error) {
     console.error("Error deleting student:", error);
     return res.status(500).json({
       message: "Server error",
-      error: error.message
+      error: error.message,
     });
   }
 };
 
 const getAllStudent = async (req, res) => {
   try {
-    const {
-      teacherId,
-      search,
-      page = 1,
-      limit = 10
-    } = req.body;
+    const { teacherId, adminId, search, page = 1, limit = 10 } = req.body;
+
+    if (!adminId) {
+      return res.status(400).json({
+        success: false,
+        message: "Admin ID is required",
+      });
+    }
 
     const pageNumber = parseInt(page);
     const limitNumber = parseInt(limit);
     const skip = (pageNumber - 1) * limitNumber;
 
-    let studentQuery = {};
+    let studentQuery = {
+      addToWaitList: false,
+      createdBy: adminId,
+    };
 
     if (search) {
       studentQuery.$or = [
-        { firstName: { $regex: search, $options: 'i' } },
-        { lastName: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { 'parent.name': { $regex: search, $options: 'i' } }
+        { studentName: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
       ];
     }
 
@@ -213,26 +233,23 @@ const getAllStudent = async (req, res) => {
     let totalCount;
 
     if (teacherId) {
-      // For teacher-specific students
       const studentsWithClasses = await Student.find(studentQuery)
         .populate({
           path: "classes",
           match: { teacherId: teacherId },
           populate: {
             path: "teacherId",
-            select: "name email"
-          }
+            select: "name email",
+          },
         })
         .populate("parent");
 
-      const filteredStudents = studentsWithClasses.filter(student =>
-        student.classes && student.classes.length > 0
+      const filteredStudents = studentsWithClasses.filter(
+        (student) => student.classes && student.classes.length > 0
       );
 
       totalCount = filteredStudents.length;
-
       students = filteredStudents.slice(skip, skip + limitNumber);
-
     } else {
       totalCount = await Student.countDocuments(studentQuery);
 
@@ -242,8 +259,8 @@ const getAllStudent = async (req, res) => {
           path: "classes",
           populate: {
             path: "teacherId",
-            select: "name email"
-          }
+            select: "name email",
+          },
         })
         .sort({ createdAt: -1 })
         .skip(skip)
@@ -253,70 +270,86 @@ const getAllStudent = async (req, res) => {
     const totalPages = Math.ceil(totalCount / limitNumber);
 
     return res.status(200).json({
-      message: teacherId ? "Teacher's students fetched successfully." : "All students fetched successfully.",
-      students,
+      success: true,
+      message: teacherId
+        ? "Teacher's students fetched successfully."
+        : "All non-waitlist students fetched successfully.",
+      data: students,
       pagination: {
         currentPage: pageNumber,
         totalPages,
         totalCount,
         hasNextPage: pageNumber < totalPages,
-        hasPrevPage: pageNumber > 1
-      }
+        hasPrevPage: pageNumber > 1,
+      },
     });
   } catch (error) {
     console.error("❌ Error fetching students:", error);
-    return res.status(500).json({ message: error.message });
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 
 const getAllWaitlistStudent = async (req, res) => {
   try {
-    let { limit = 10, page = 1, search = "" } = req.body;
+    let { limit = 10, page = 1, search = "", adminId } = req.body;
 
-    limit = Number(limit) || 10;    
+    if (!adminId) {
+      return res.status(400).json({
+        success: false,
+        message: "Admin ID is required",
+      });
+    }
+
+    limit = Number(limit) || 10;
     page = Number(page) || 1;
     const skip = (page - 1) * limit;
 
     let searchFilter = {};
     if (search && search.trim() !== "") {
-      const regex = new RegExp(search, "i"); 
+      const regex = new RegExp(search, "i");
       searchFilter = {
-        $or: [
-          { name: regex },
-          { email: regex },
-          { phone: regex }
-        ]
+        $or: [{ studentName: regex }, { email: regex }, { phone: regex }],
       };
     }
 
     const query = {
       addToWaitList: true,
+      createdBy: adminId,
       ...searchFilter,
     };
 
     const waitlist = await Student.find(query)
       .populate("parent")
-      .populate("class")
+      .populate("classes")
       .skip(skip)
       .limit(limit);
 
     const total = await Student.countDocuments(query);
 
     return res.status(200).json({
+      success: true,
       message: "Waitlist students fetched successfully.",
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit),
-      waitlist,
+      data: waitlist,
+      pagination: {
+        currentPage: page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasNextPage: page < Math.ceil(total / limit),
+        hasPrevPage: page > 1,
+      },
     });
-
   } catch (error) {
     console.error("❌ Error fetching waitlisted students:", error);
-    return res.status(500).json({ message: error.message });
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
-
 
 const addToWaitlist = async (req, res) => {
   try {
@@ -324,7 +357,7 @@ const addToWaitlist = async (req, res) => {
 
     if (!studentId) {
       return res.status(400).json({
-        message: "studentId is required"
+        message: "studentId is required",
       });
     }
 
@@ -336,7 +369,7 @@ const addToWaitlist = async (req, res) => {
 
     if (!student) {
       return res.status(404).json({
-        message: "Student not found."
+        message: "Student not found.",
       });
     }
 
@@ -350,13 +383,13 @@ const addToWaitlist = async (req, res) => {
   }
 };
 
-const removeFromWaitlist = async (req, res) => {
+const removeFromStudentWaitlist = async (req, res) => {
   try {
     const { studentId } = req.body;
 
     if (!studentId) {
       return res.status(400).json({
-        message: "studentId is required"
+        message: "studentId is required",
       });
     }
 
@@ -368,7 +401,7 @@ const removeFromWaitlist = async (req, res) => {
 
     if (!student) {
       return res.status(404).json({
-        message: "Student not found."
+        message: "Student not found.",
       });
     }
 
@@ -388,35 +421,35 @@ const getStudentById = async (req, res) => {
 
     if (!studentId) {
       return res.status(400).json({
-        message: "studentId is required"
+        message: "studentId is required",
       });
     }
 
     if (!mongoose.Types.ObjectId.isValid(studentId)) {
       return res.status(400).json({
-        message: "Invalid student ID format"
+        message: "Invalid student ID format",
       });
     }
 
     const studentData = await Student.aggregate([
       {
         $match: {
-          _id: new mongoose.Types.ObjectId(studentId)
-        }
+          _id: new mongoose.Types.ObjectId(studentId),
+        },
       },
       {
         $lookup: {
           from: "parents",
           localField: "parent",
           foreignField: "_id",
-          as: "parent"
-        }
+          as: "parent",
+        },
       },
       {
         $unwind: {
           path: "$parent",
-          preserveNullAndEmptyArrays: true
-        }
+          preserveNullAndEmptyArrays: true,
+        },
       },
       {
         $lookup: {
@@ -426,35 +459,35 @@ const getStudentById = async (req, res) => {
             {
               $match: {
                 $expr: {
-                  $in: ["$$studentId", "$records.studentId"]
-                }
-              }
+                  $in: ["$$studentId", "$records.studentId"],
+                },
+              },
             },
             {
-              $unwind: "$records"
+              $unwind: "$records",
             },
             {
               $match: {
                 $expr: {
-                  $eq: ["$records.studentId", "$$studentId"]
-                }
-              }
+                  $eq: ["$records.studentId", "$$studentId"],
+                },
+              },
             },
             {
               $lookup: {
                 from: "classes",
                 localField: "classId",
                 foreignField: "_id",
-                as: "classInfo"
-              }
+                as: "classInfo",
+              },
             },
             {
               $lookup: {
                 from: "teachers",
                 localField: "teacherId",
                 foreignField: "_id",
-                as: "teacherInfo"
-              }
+                as: "teacherInfo",
+              },
             },
             {
               $project: {
@@ -462,15 +495,15 @@ const getStudentById = async (req, res) => {
                 status: "$records.status",
                 remarks: "$records.remarks",
                 className: { $arrayElemAt: ["$classInfo.name", 0] },
-                teacherName: { $arrayElemAt: ["$teacherInfo.name", 0] }
-              }
+                teacherName: { $arrayElemAt: ["$teacherInfo.name", 0] },
+              },
             },
             {
-              $sort: { date: -1 }
-            }
+              $sort: { date: -1 },
+            },
           ],
-          as: "attendance"
-        }
+          as: "attendance",
+        },
       },
       {
         $lookup: {
@@ -482,26 +515,26 @@ const getStudentById = async (req, res) => {
                 $expr: {
                   $and: [
                     { $eq: ["$class", "$$studentClass"] },
-                    { $eq: ["$type", "Assignment"] }
-                  ]
-                }
-              }
+                    { $eq: ["$type", "Assignment"] },
+                  ],
+                },
+              },
             },
             {
               $lookup: {
                 from: "teachers",
                 localField: "teacher",
                 foreignField: "_id",
-                as: "teacherInfo"
-              }
+                as: "teacherInfo",
+              },
             },
             {
               $lookup: {
                 from: "classes",
                 localField: "class",
                 foreignField: "_id",
-                as: "classInfo"
-              }
+                as: "classInfo",
+              },
             },
             {
               $project: {
@@ -513,15 +546,15 @@ const getStudentById = async (req, res) => {
                 dueDate: 1,
                 attachments: 1,
                 teacherName: { $arrayElemAt: ["$teacherInfo.name", 0] },
-                className: { $arrayElemAt: ["$classInfo.name", 0] }
-              }
+                className: { $arrayElemAt: ["$classInfo.name", 0] },
+              },
             },
             {
-              $sort: { dueDate: 1 }
-            }
+              $sort: { dueDate: 1 },
+            },
           ],
-          as: "assignments"
-        }
+          as: "assignments",
+        },
       },
       // Calculate attendance stats
       {
@@ -529,7 +562,7 @@ const getStudentById = async (req, res) => {
           attendanceStats: {
             $let: {
               vars: {
-                attendanceRecords: "$attendance"
+                attendanceRecords: "$attendance",
               },
               in: {
                 total: { $size: "$$attendanceRecords" },
@@ -538,41 +571,41 @@ const getStudentById = async (req, res) => {
                     $filter: {
                       input: "$$attendanceRecords",
                       as: "record",
-                      cond: { $eq: ["$$record.status", "Present"] }
-                    }
-                  }
+                      cond: { $eq: ["$$record.status", "Present"] },
+                    },
+                  },
                 },
                 absent: {
                   $size: {
                     $filter: {
                       input: "$$attendanceRecords",
                       as: "record",
-                      cond: { $eq: ["$$record.status", "Absent"] }
-                    }
-                  }
+                      cond: { $eq: ["$$record.status", "Absent"] },
+                    },
+                  },
                 },
                 late: {
                   $size: {
                     $filter: {
                       input: "$$attendanceRecords",
                       as: "record",
-                      cond: { $eq: ["$$record.status", "Late"] }
-                    }
-                  }
+                      cond: { $eq: ["$$record.status", "Late"] },
+                    },
+                  },
                 },
                 excused: {
                   $size: {
                     $filter: {
                       input: "$$attendanceRecords",
                       as: "record",
-                      cond: { $eq: ["$$record.status", "Excused"] }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
+                      cond: { $eq: ["$$record.status", "Excused"] },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
       // Calculate percentage
       {
@@ -587,19 +620,19 @@ const getStudentById = async (req, res) => {
                       {
                         $divide: [
                           "$attendanceStats.present",
-                          "$attendanceStats.total"
-                        ]
+                          "$attendanceStats.total",
+                        ],
                       },
-                      100
-                    ]
+                      100,
+                    ],
                   },
-                  0
-                ]
+                  0,
+                ],
               },
-              else: 0
-            }
-          }
-        }
+              else: 0,
+            },
+          },
+        },
       },
       {
         $project: {
@@ -619,7 +652,7 @@ const getStudentById = async (req, res) => {
             spouse: "$parent.spouse",
             spousePhone: "$parent.spousePhone",
             emergencyPhone: "$parent.emergencyPhone",
-            identityNumber: "$parent.identityNumber"
+            identityNumber: "$parent.identityNumber",
           },
           attendance: 1,
           assignments: 1,
@@ -627,20 +660,20 @@ const getStudentById = async (req, res) => {
           enrollDate: 1,
           fee: 1,
           createdAt: 1,
-          updatedAt: 1
-        }
-      }
+          updatedAt: 1,
+        },
+      },
     ]);
 
     if (!studentData || studentData.length === 0) {
       return res.status(404).json({
-        message: "Student not found."
+        message: "Student not found.",
       });
     }
 
     return res.status(200).json({
       message: "Student fetched successfully.",
-      student: studentData[0]
+      student: studentData[0],
     });
   } catch (error) {
     console.error("❌ Error fetching student by ID:", error);
@@ -655,14 +688,14 @@ const updateStudentById = async (req, res) => {
     if (!id) {
       return res.status(400).json({
         success: false,
-        message: "Student ID is required"
+        message: "Student ID is required",
       });
     }
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid student ID format"
+        message: "Invalid student ID format",
       });
     }
 
@@ -686,7 +719,7 @@ const updateStudentById = async (req, res) => {
           if (!mongoose.Types.ObjectId.isValid(classId)) {
             return res.status(400).json({
               success: false,
-              message: `Invalid class ID format: ${classId}`
+              message: `Invalid class ID format: ${classId}`,
             });
           }
         }
@@ -695,7 +728,7 @@ const updateStudentById = async (req, res) => {
         if (!mongoose.Types.ObjectId.isValid(classes)) {
           return res.status(400).json({
             success: false,
-            message: "Invalid class ID format"
+            message: "Invalid class ID format",
           });
         }
         updateFields.classes = [classes];
@@ -703,10 +736,10 @@ const updateStudentById = async (req, res) => {
     }
 
     if (fee !== undefined) {
-      if (typeof fee !== 'number' || fee < 0) {
+      if (typeof fee !== "number" || fee < 0) {
         return res.status(400).json({
           success: false,
-          message: "Fee must be a positive number"
+          message: "Fee must be a positive number",
         });
       }
       updateFields.fee = fee;
@@ -715,55 +748,57 @@ const updateStudentById = async (req, res) => {
     if (Object.keys(updateFields).length === 0) {
       return res.status(400).json({
         success: false,
-        message: "No valid fields provided for update"
+        message: "No valid fields provided for update",
       });
     }
 
-    const updatedStudent = await mongoose.model("Student").findByIdAndUpdate(
-      id,
-      { $set: updateFields },
-      {
-        new: true,
-        runValidators: true
-      }
-    ).populate('classes', 'className');
+    const updatedStudent = await mongoose
+      .model("Student")
+      .findByIdAndUpdate(
+        id,
+        { $set: updateFields },
+        {
+          new: true,
+          runValidators: true,
+        }
+      )
+      .populate("classes", "className");
 
     if (!updatedStudent) {
       return res.status(404).json({
         success: false,
-        message: "Student not found"
+        message: "Student not found",
       });
     }
 
     return res.status(200).json({
       success: true,
       message: "Student updated successfully",
-      data: updatedStudent
+      data: updatedStudent,
     });
-
   } catch (error) {
     console.error("Error updating student:", error);
 
     if (error.code === 11000) {
       return res.status(400).json({
         success: false,
-        message: "Email already exists"
+        message: "Email already exists",
       });
     }
 
-    if (error.name === 'ValidationError') {
-      const errors = Object.values(error.errors).map(err => err.message);
+    if (error.name === "ValidationError") {
+      const errors = Object.values(error.errors).map((err) => err.message);
       return res.status(400).json({
         success: false,
         message: "Validation error",
-        errors: errors
+        errors: errors,
       });
     }
 
     return res.status(500).json({
       success: false,
       message: "Internal server error",
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -771,18 +806,18 @@ const updateStudentById = async (req, res) => {
 const getStudentNamesWithIds = async (req, res) => {
   try {
     const students = await Student.find()
-      .select('studentName _id')
+      .select("studentName _id")
       .sort({ studentName: 1 });
 
-    const studentList = students.map(student => ({
+    const studentList = students.map((student) => ({
       id: student._id,
-      name: student.studentName
+      name: student.studentName,
     }));
 
     return res.status(200).json({
       message: "Student names with IDs fetched successfully.",
       students: studentList,
-      count: studentList.length
+      count: studentList.length,
     });
   } catch (error) {
     console.error("❌ Error fetching student names:", error);
@@ -808,7 +843,8 @@ const getStudentDashboardStats = async (req, res) => {
     }
 
     // Get the first class (since student can have multiple classes)
-    const studentClass = student.classes && student.classes.length > 0 ? student.classes[0] : null;
+    const studentClass =
+      student.classes && student.classes.length > 0 ? student.classes[0] : null;
     const classId = studentClass ? studentClass._id : null;
 
     const currentDate = new Date();
@@ -818,16 +854,26 @@ const getStudentDashboardStats = async (req, res) => {
     const endOfToday = new Date(currentDate);
     endOfToday.setHours(23, 59, 59, 999);
 
-    const daysOfWeek = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const daysOfWeek = [
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+    ];
     const currentDayOfWeek = daysOfWeek[currentDate.getDay()];
 
     // Get today's timetable - using the first class
-    const todaysTimetable = classId ? await Timetable.find({
-      class: classId,
-      dayOfWeek: currentDayOfWeek
-    })
-      .populate("teacher", "name")
-      .sort({ startTime: 1 }) : [];
+    const todaysTimetable = classId
+      ? await Timetable.find({
+          class: classId,
+          dayOfWeek: currentDayOfWeek,
+        })
+          .populate("teacher", "name")
+          .sort({ startTime: 1 })
+      : [];
 
     const todaysClasses = todaysTimetable.length;
 
@@ -835,13 +881,15 @@ const getStudentDashboardStats = async (req, res) => {
     const sevenDaysFromNow = new Date();
     sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
 
-    const assignmentsDue = classId ? await Assignment.countDocuments({
-      class: classId,
-      dueDate: {
-        $gte: startOfToday,
-        $lte: sevenDaysFromNow
-      }
-    }) : 0;
+    const assignmentsDue = classId
+      ? await Assignment.countDocuments({
+          class: classId,
+          dueDate: {
+            $gte: startOfToday,
+            $lte: sevenDaysFromNow,
+          },
+        })
+      : 0;
 
     // Attendance calculations for current year
     const currentYear = currentDate.getFullYear();
@@ -852,8 +900,8 @@ const getStudentDashboardStats = async (req, res) => {
       "records.studentId": studentId,
       date: {
         $gte: startOfYear,
-        $lte: endOfYear
-      }
+        $lte: endOfYear,
+      },
     });
 
     let totalDays = 0;
@@ -861,9 +909,9 @@ const getStudentDashboardStats = async (req, res) => {
     let absentDays = 0;
     let lateDays = 0;
 
-    attendanceRecords.forEach(record => {
-      const studentRecord = record.records.find(r =>
-        r.studentId.toString() === studentId
+    attendanceRecords.forEach((record) => {
+      const studentRecord = record.records.find(
+        (r) => r.studentId.toString() === studentId
       );
       if (studentRecord) {
         totalDays++;
@@ -877,13 +925,25 @@ const getStudentDashboardStats = async (req, res) => {
       }
     });
 
-    const attendancePercentage = totalDays > 0
-      ? Math.round((presentDays / totalDays) * 100)
-      : 0;
+    const attendancePercentage =
+      totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
 
     // Monthly attendance breakdown
     const monthlyAttendance = [];
-    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const months = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
 
     for (let i = 0; i < 12; i++) {
       const startOfMonth = new Date(currentYear, i, 1);
@@ -891,7 +951,7 @@ const getStudentDashboardStats = async (req, res) => {
 
       const monthAttendance = await Attendance.find({
         "records.studentId": studentId,
-        date: { $gte: startOfMonth, $lte: endOfMonth }
+        date: { $gte: startOfMonth, $lte: endOfMonth },
       });
 
       let monthTotal = 0;
@@ -899,9 +959,9 @@ const getStudentDashboardStats = async (req, res) => {
       let monthAbsent = 0;
       let monthLate = 0;
 
-      monthAttendance.forEach(record => {
-        const studentRecord = record.records.find(r =>
-          r.studentId.toString() === studentId
+      monthAttendance.forEach((record) => {
+        const studentRecord = record.records.find(
+          (r) => r.studentId.toString() === studentId
         );
         if (studentRecord) {
           monthTotal++;
@@ -915,17 +975,14 @@ const getStudentDashboardStats = async (req, res) => {
         }
       });
 
-      const presentPercentage = monthTotal > 0
-        ? Math.round((monthPresent / monthTotal) * 100)
-        : 0;
+      const presentPercentage =
+        monthTotal > 0 ? Math.round((monthPresent / monthTotal) * 100) : 0;
 
-      const absentPercentage = monthTotal > 0
-        ? Math.round((monthAbsent / monthTotal) * 100)
-        : 0;
+      const absentPercentage =
+        monthTotal > 0 ? Math.round((monthAbsent / monthTotal) * 100) : 0;
 
-      const latePercentage = monthTotal > 0
-        ? Math.round((monthLate / monthTotal) * 100)
-        : 0;
+      const latePercentage =
+        monthTotal > 0 ? Math.round((monthLate / monthTotal) * 100) : 0;
 
       monthlyAttendance.push({
         month: months[i],
@@ -935,7 +992,7 @@ const getStudentDashboardStats = async (req, res) => {
         actualPresent: monthPresent,
         actualAbsent: monthAbsent,
         actualLate: monthLate,
-        total: monthTotal
+        total: monthTotal,
       });
     }
 
@@ -946,7 +1003,7 @@ const getStudentDashboardStats = async (req, res) => {
 
     const currentMonthAttendance = await Attendance.find({
       "records.studentId": studentId,
-      date: { $gte: startOfCurrentMonth, $lte: endOfCurrentMonth }
+      date: { $gte: startOfCurrentMonth, $lte: endOfCurrentMonth },
     });
 
     let currentMonthPresent = 0;
@@ -954,9 +1011,9 @@ const getStudentDashboardStats = async (req, res) => {
     let currentMonthLate = 0;
     let currentMonthTotal = 0;
 
-    currentMonthAttendance.forEach(record => {
-      const studentRecord = record.records.find(r =>
-        r.studentId.toString() === studentId
+    currentMonthAttendance.forEach((record) => {
+      const studentRecord = record.records.find(
+        (r) => r.studentId.toString() === studentId
       );
       if (studentRecord) {
         currentMonthTotal++;
@@ -970,9 +1027,10 @@ const getStudentDashboardStats = async (req, res) => {
       }
     });
 
-    const currentMonthPercentage = currentMonthTotal > 0
-      ? Math.round((currentMonthPresent / currentMonthTotal) * 100)
-      : 0;
+    const currentMonthPercentage =
+      currentMonthTotal > 0
+        ? Math.round((currentMonthPresent / currentMonthTotal) * 100)
+        : 0;
 
     const studentAttendance = {
       studentId: studentId,
@@ -984,29 +1042,37 @@ const getStudentDashboardStats = async (req, res) => {
         absent: currentMonthAbsent,
         late: currentMonthLate,
         total: currentMonthTotal,
-        percentage: currentMonthPercentage
+        percentage: currentMonthPercentage,
       },
-      status: currentMonthPercentage >= 75 ? "Good" :
-        currentMonthPercentage >= 50 ? "Average" : "Poor",
+      status:
+        currentMonthPercentage >= 75
+          ? "Good"
+          : currentMonthPercentage >= 50
+          ? "Average"
+          : "Poor",
       yearlyStats: {
         present: presentDays,
         absent: absentDays,
         late: lateDays,
         total: totalDays,
-        percentage: attendancePercentage
-      }
+        percentage: attendancePercentage,
+      },
     };
 
     // Upcoming exams/assignments
-    const upcomingExams = classId ? await Assignment.countDocuments({
-      class: classId,
-      dueDate: { $gte: startOfToday }
-    }) : 0;
+    const upcomingExams = classId
+      ? await Assignment.countDocuments({
+          class: classId,
+          dueDate: { $gte: startOfToday },
+        })
+      : 0;
 
     // ========== FIXED GPA CALCULATION SECTION ==========
     // Grades and GPA calculation based on Grade schema with assignment totalMarks
-    const grades = await Grade.find({ student: studentId })
-      .populate("assignment", "subject title totalMarks");
+    const grades = await Grade.find({ student: studentId }).populate(
+      "assignment",
+      "subject title totalMarks"
+    );
 
     let totalGPA = 0;
     let gradeCount = 0;
@@ -1017,15 +1083,15 @@ const getStudentDashboardStats = async (req, res) => {
     // Grade point mapping
     const gradePointMap = {
       "A+": 4.0,
-      "A": 4.0,
+      A: 4.0,
       "B+": 3.3,
-      "B": 3.0,
-      "C": 2.0,
-      "D": 1.0,
-      "F": 0.0
+      B: 3.0,
+      C: 2.0,
+      D: 1.0,
+      F: 0.0,
     };
 
-    grades.forEach(grade => {
+    grades.forEach((grade) => {
       const assignmentTotalMarks = grade.assignment?.totalMarks || 40;
       const percentage = (grade.marksObtained / assignmentTotalMarks) * 100;
 
@@ -1034,7 +1100,9 @@ const getStudentDashboardStats = async (req, res) => {
         totalGPA += gradePoints;
         gradeCount++;
       } else {
-        console.log(`✗ Grade "${grade.grade}" not found in gradePointMap or is undefined`);
+        console.log(
+          `✗ Grade "${grade.grade}" not found in gradePointMap or is undefined`
+        );
       }
 
       if (grade.marksObtained !== undefined && grade.marksObtained !== null) {
@@ -1044,10 +1112,10 @@ const getStudentDashboardStats = async (req, res) => {
       }
     });
 
-
-    const overallPercentage = totalPossibleMarks > 0
-      ? (totalMarks / totalPossibleMarks * 100).toFixed(1)
-      : "0.0";
+    const overallPercentage =
+      totalPossibleMarks > 0
+        ? ((totalMarks / totalPossibleMarks) * 100).toFixed(1)
+        : "0.0";
 
     let currentGPA = "0.00";
     if (gradeCount > 0) {
@@ -1079,17 +1147,17 @@ const getStudentDashboardStats = async (req, res) => {
               from: "assignments",
               localField: "assignment",
               foreignField: "_id",
-              as: "assignmentInfo"
-            }
+              as: "assignmentInfo",
+            },
           },
           {
-            $unwind: "$assignmentInfo"
+            $unwind: "$assignmentInfo",
           },
           {
             $match: {
               student: new mongoose.Types.ObjectId(studentId),
-              "assignmentInfo.class": new mongoose.Types.ObjectId(classId)
-            }
+              "assignmentInfo.class": new mongoose.Types.ObjectId(classId),
+            },
           },
           {
             $group: {
@@ -1097,8 +1165,8 @@ const getStudentDashboardStats = async (req, res) => {
               totalMarks: { $sum: "$assignmentInfo.totalMarks" },
               obtainedMarks: { $sum: "$marksObtained" },
               assignmentCount: { $sum: 1 },
-              averageMarks: { $avg: "$marksObtained" }
-            }
+              averageMarks: { $avg: "$marksObtained" },
+            },
           },
           {
             $project: {
@@ -1106,17 +1174,22 @@ const getStudentDashboardStats = async (req, res) => {
               percentage: {
                 $cond: {
                   if: { $gt: ["$totalMarks", 0] },
-                  then: { $multiply: [{ $divide: ["$obtainedMarks", "$totalMarks"] }, 100] },
-                  else: 0
-                }
+                  then: {
+                    $multiply: [
+                      { $divide: ["$obtainedMarks", "$totalMarks"] },
+                      100,
+                    ],
+                  },
+                  else: 0,
+                },
               },
               averageScore: { $round: ["$averageMarks", 2] },
-              assignmentCount: 1
-            }
+              assignmentCount: 1,
+            },
           },
           {
-            $sort: { percentage: -1 }
-          }
+            $sort: { percentage: -1 },
+          },
         ]);
 
         subjectPerformance.push(...subjectGrades);
@@ -1134,30 +1207,32 @@ const getStudentDashboardStats = async (req, res) => {
             from: "assignments",
             localField: "assignment",
             foreignField: "_id",
-            as: "assignmentInfo"
-          }
+            as: "assignmentInfo",
+          },
         },
         {
-          $unwind: "$assignmentInfo"
+          $unwind: "$assignmentInfo",
         },
         {
           $match: {
-            student: { $in: classStudents.map(s => new mongoose.Types.ObjectId(s._id)) },
-            "assignmentInfo.class": new mongoose.Types.ObjectId(classId)
-          }
+            student: {
+              $in: classStudents.map((s) => new mongoose.Types.ObjectId(s._id)),
+            },
+            "assignmentInfo.class": new mongoose.Types.ObjectId(classId),
+          },
         },
         {
           $group: {
             _id: "$student",
             totalMarks: { $sum: "$assignmentInfo.totalMarks" },
             obtainedMarks: { $sum: "$marksObtained" },
-            assignmentCount: { $sum: 1 }
-          }
+            assignmentCount: { $sum: 1 },
+          },
         },
         {
           $match: {
-            assignmentCount: { $gte: 1 }
-          }
+            assignmentCount: { $gte: 1 },
+          },
         },
         {
           $project: {
@@ -1165,36 +1240,45 @@ const getStudentDashboardStats = async (req, res) => {
             percentage: {
               $cond: {
                 if: { $gt: ["$totalMarks", 0] },
-                then: { $multiply: [{ $divide: ["$obtainedMarks", "$totalMarks"] }, 100] },
-                else: 0
-              }
+                then: {
+                  $multiply: [
+                    { $divide: ["$obtainedMarks", "$totalMarks"] },
+                    100,
+                  ],
+                },
+                else: 0,
+              },
             },
-            assignmentCount: 1
-          }
+            assignmentCount: 1,
+          },
         },
         {
-          $sort: { percentage: -1 }
-        }
+          $sort: { percentage: -1 },
+        },
       ]);
 
-      const studentRankIndex = studentGPAs.findIndex(grade =>
-        grade.studentId.toString() === studentId
+      const studentRankIndex = studentGPAs.findIndex(
+        (grade) => grade.studentId.toString() === studentId
       );
 
       if (studentRankIndex !== -1) {
-        classRank = `${studentRankIndex + 1}${getOrdinalSuffix(studentRankIndex + 1)}`;
+        classRank = `${studentRankIndex + 1}${getOrdinalSuffix(
+          studentRankIndex + 1
+        )}`;
       }
     }
 
-    const subjects = classId ? await Assignment.distinct("subject", {
-      class: classId
-    }) : [];
+    const subjects = classId
+      ? await Assignment.distinct("subject", {
+          class: classId,
+        })
+      : [];
 
-    const classSchedule = todaysTimetable.map(session => ({
+    const classSchedule = todaysTimetable.map((session) => ({
       time: formatTime(session.startTime),
       subject: session.subject || "General",
       teacher: session.teacher ? session.teacher.name : "Teacher",
-      room: "Classroom"
+      room: "Classroom",
     }));
 
     let formattedTopStudents = [];
@@ -1205,28 +1289,28 @@ const getStudentDashboardStats = async (req, res) => {
             from: "students",
             localField: "student",
             foreignField: "_id",
-            as: "studentInfo"
-          }
+            as: "studentInfo",
+          },
         },
         {
-          $unwind: "$studentInfo"
+          $unwind: "$studentInfo",
         },
         {
           $lookup: {
             from: "assignments",
             localField: "assignment",
             foreignField: "_id",
-            as: "assignmentInfo"
-          }
+            as: "assignmentInfo",
+          },
         },
         {
-          $unwind: "$assignmentInfo"
+          $unwind: "$assignmentInfo",
         },
         {
           $match: {
             "studentInfo.classes": new mongoose.Types.ObjectId(classId),
-            "assignmentInfo.class": new mongoose.Types.ObjectId(classId)
-          }
+            "assignmentInfo.class": new mongoose.Types.ObjectId(classId),
+          },
         },
         {
           $group: {
@@ -1234,13 +1318,13 @@ const getStudentDashboardStats = async (req, res) => {
             totalMarks: { $sum: "$assignmentInfo.totalMarks" },
             obtainedMarks: { $sum: "$marksObtained" },
             studentName: { $first: "$studentInfo.studentName" },
-            assignmentCount: { $sum: 1 }
-          }
+            assignmentCount: { $sum: 1 },
+          },
         },
         {
           $match: {
-            assignmentCount: { $gte: 1 }
-          }
+            assignmentCount: { $gte: 1 },
+          },
         },
         {
           $project: {
@@ -1248,48 +1332,60 @@ const getStudentDashboardStats = async (req, res) => {
             percentage: {
               $cond: {
                 if: { $gt: ["$totalMarks", 0] },
-                then: { $multiply: [{ $divide: ["$obtainedMarks", "$totalMarks"] }, 100] },
-                else: 0
-              }
+                then: {
+                  $multiply: [
+                    { $divide: ["$obtainedMarks", "$totalMarks"] },
+                    100,
+                  ],
+                },
+                else: 0,
+              },
             },
-            assignmentCount: 1
-          }
+            assignmentCount: 1,
+          },
         },
         {
-          $sort: { percentage: -1 }
+          $sort: { percentage: -1 },
         },
         {
-          $limit: 4
-        }
+          $limit: 4,
+        },
       ]);
 
       formattedTopStudents = topStudents.map((stud, index) => ({
         rank: index + 1,
         name: stud.studentName,
         percentage: stud.percentage ? stud.percentage.toFixed(1) + "%" : "0%",
-        gpa: stud.percentage ? calculateGPAFromPercentage(stud.percentage) : "0.00"
+        gpa: stud.percentage
+          ? calculateGPAFromPercentage(stud.percentage)
+          : "0.00",
       }));
     }
 
-    const assignmentsDueSoon = classId ? await Assignment.find({
-      class: classId,
-      dueDate: {
-        $gte: startOfToday,
-        $lte: sevenDaysFromNow
-      }
-    }).populate("teacher", "name")
-      .sort({ dueDate: 1 })
-      .limit(4) : [];
+    const assignmentsDueSoon = classId
+      ? await Assignment.find({
+          class: classId,
+          dueDate: {
+            $gte: startOfToday,
+            $lte: sevenDaysFromNow,
+          },
+        })
+          .populate("teacher", "name")
+          .sort({ dueDate: 1 })
+          .limit(4)
+      : [];
 
-    const formattedAssignments = assignmentsDueSoon.map(assignment => ({
+    const formattedAssignments = assignmentsDueSoon.map((assignment) => ({
       subject: assignment.subject,
       assignment: assignment.title,
-      date: new Date(assignment.dueDate).toLocaleDateString('en-US', {
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric'
+      date: new Date(assignment.dueDate).toLocaleDateString("en-US", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
       }),
-      isUrgent: new Date(assignment.dueDate) <= new Date(Date.now() + 3 * 24 * 60 * 60 * 1000) // Within 3 days
+      isUrgent:
+        new Date(assignment.dueDate) <=
+        new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), // Within 3 days
     }));
 
     const dashboardData = {
@@ -1297,7 +1393,7 @@ const getStudentDashboardStats = async (req, res) => {
         todaysClasses,
         assignmentsDue,
         attendancePercentage,
-        upcomingExams
+        upcomingExams,
       },
 
       monthlyAttendance,
@@ -1311,7 +1407,7 @@ const getStudentDashboardStats = async (req, res) => {
         gpa: currentGPA,
         overallPercentage: overallPercentage + "%",
         totalGradedAssignments: gradedAssignmentsCount,
-        subjectPerformance
+        subjectPerformance,
       },
 
       classSchedule,
@@ -1324,20 +1420,94 @@ const getStudentDashboardStats = async (req, res) => {
         name: student.studentName,
         class: studentClass ? studentClass.name : "Not Assigned",
         email: student.email,
-        parent: student.parent
-      }
+        parent: student.parent,
+      },
     };
 
     res.status(200).json({
       success: true,
-      data: dashboardData
+      data: dashboardData,
     });
-
   } catch (error) {
     console.error("Error fetching student dashboard stats:", error);
     res.status(500).json({
       success: false,
-      error: "Internal server error"
+      error: "Internal server error",
+    });
+  }
+};
+
+const getParentChildById = async (req, res) => {
+  try {
+    const { parentId, page = 1, limit = 10, search = "" } = req.body;
+
+    if (!parentId) {
+      return res.status(400).json({
+        success: false,
+        message: "Parent ID is required",
+      });
+    }
+
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+
+    const parent = await Parent.findById(parentId).lean();
+    
+    if (!parent) {
+      return res.status(404).json({
+        success: false,
+        message: "Parent not found",
+      });
+    }
+
+    let searchQuery = { parent: parentId };
+    
+    if (search) {
+      searchQuery.$or = [
+        { studentName: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const totalStudents = await Student.countDocuments(searchQuery);
+
+    const students = await Student.find(searchQuery)
+      .select("studentName phone address dateOfBirth gender classes email parent")
+      .populate({ path: "classes", select: "className" })
+      .populate({ path: "parent", select: "fullName" }) 
+      .skip(skip)
+      .limit(limitNum)
+      .lean();
+
+    const studentsWithParentName = students.map(student => ({
+      ...student,
+      parentName: student.parent?.fullName || "",
+      parent: undefined,
+    }));
+
+    const totalPages = Math.ceil(totalStudents / limitNum);
+
+    res.status(200).json({
+      success: true,
+      parent,
+      students: studentsWithParentName || [],
+      pagination: {
+        currentPage: pageNum,
+        totalPages,
+        totalStudents,
+        hasNextPage: pageNum < totalPages,
+        hasPrevPage: pageNum > 1,
+        limit: limitNum
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching parent and students:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
     });
   }
 };
@@ -1370,10 +1540,10 @@ function getOrdinalSuffix(n) {
 function formatTime(timeString) {
   if (!timeString) return "";
   const time = new Date(`2000-01-01T${timeString}`);
-  return time.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true
+  return time.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
   });
 }
 
@@ -1382,10 +1552,11 @@ module.exports = {
   getAllStudent,
   getAllWaitlistStudent,
   addToWaitlist,
-  removeFromWaitlist,
+  removeFromStudentWaitlist,
   getStudentById,
   getStudentNamesWithIds,
   getStudentDashboardStats,
   updateStudentById,
-  deleteStudent
+  deleteStudent,
+  getParentChildById,
 };

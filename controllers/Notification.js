@@ -2,17 +2,14 @@ const Notification = require("../models/Notification");
 
 const getUserNotifications = async (req, res) => {
   try {
-    console.log("This is Called")
     const { userId, userType, page = 1, limit = 20, unreadOnly = false } = req.body;
 
-    // Find the user's combined notification object
     const notification = await Notification.findOne({
       recipient: userId,
       recipientModel: userType,
       isCombinedNotification: true
     });
 
-    // If no notification object exists, return empty results
     if (!notification) {
       return res.json({
         notifications: [],
