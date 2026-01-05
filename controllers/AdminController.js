@@ -7,6 +7,7 @@ const Invoice = require("../models/Invoice");
 const Payment = require("../models/Payments");
 
 const bcrypt = require("bcryptjs");
+const { sendWelcomeEmail } = require("../services/emailServices");
 
 const createAdmin = async (req, res) => {
   try {
@@ -27,6 +28,14 @@ const createAdmin = async (req, res) => {
       });
     }
 
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: "User with this email already exists",
+      });
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const admin = await Admin.create({
@@ -39,12 +48,23 @@ const createAdmin = async (req, res) => {
       branch,
     });
 
-    return res.status(201).json({
-      success: true,
-      message: "Admin created successfully",
-      admin,
+    const user = await User.create({
+      email,
+      password: hashedPassword,
+      role: "Admin",
     });
 
+    await sendWelcomeEmail({
+      email: email,
+      role: "Admin",
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Admin and User created successfully",
+      admin,
+      user,
+    });
   } catch (error) {
     console.error(error);
     return res.status(500).json({
@@ -199,7 +219,7 @@ const createSubAdmin = async (req, res) => {
       email,
       password: hashedPassword,
       phone,
-      permissions: [permissions], // <--- important fix
+      permissions: [permissions],
       photo,
     });
 
@@ -209,6 +229,11 @@ const createSubAdmin = async (req, res) => {
       email,
       password: hashedPassword,
       role: "SubAdmin",
+    });
+
+    await sendWelcomeEmail({
+      email: email,
+      role: "Admin",
     });
 
     return res.status(201).json({
@@ -407,8 +432,22 @@ const editSubAdminById = async (req, res) => {
 
 const updateTheme = async (req, res) => {
   try {
-    const { adminId, themeColor, secondaryColor, logo, favicon, mainText } =
-      req.body;
+    // Handle both JSON and multipart/form-data requests
+    const body = req.body || {};
+    const { adminId, themeColor, secondaryColor, logo, favicon, mainText } = body;
+
+    // Handle file uploads if present
+    let logoPath = logo;
+    let faviconPath = favicon;
+
+    if (req.files) {
+      if (req.files.logo && req.files.logo[0]) {
+        logoPath = `/uploads/${req.files.logo[0].filename}`;
+      }
+      if (req.files.favicon && req.files.favicon[0]) {
+        faviconPath = `/uploads/${req.files.favicon[0].filename}`;
+      }
+    }
 
     if (!adminId) {
       return res.status(400).json({
@@ -429,8 +468,8 @@ const updateTheme = async (req, res) => {
     if (themeColor) updateData["websiteSettings.themeColor"] = themeColor;
     if (secondaryColor)
       updateData["websiteSettings.secondaryColor"] = secondaryColor;
-    if (logo !== undefined) updateData["websiteSettings.logo"] = logo;
-    if (favicon !== undefined) updateData["websiteSettings.favicon"] = favicon;
+    if (logoPath !== undefined) updateData["websiteSettings.logo"] = logoPath;
+    if (faviconPath !== undefined) updateData["websiteSettings.favicon"] = faviconPath;
     if (mainText !== undefined)
       updateData["websiteSettings.mainText"] = mainText;
 
@@ -734,16 +773,24 @@ const getThemeByBranch = async (req, res) => {
     const { branch } = req.body;
 
     if (!branch) {
-      return res.status(400).json({ success: false, message: "Branch is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Branch is required" });
     }
 
-    const admin = await Admin.findOne({ branch }).select("websiteSettings -_id");
+    const admin = await Admin.findOne({ branch }).select(
+      "websiteSettings -_id"
+    );
 
     if (!admin) {
-      return res.status(404).json({ success: false, message: "Theme not found for this branch" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Theme not found for this branch" });
     }
 
-    return res.status(200).json({ success: true, theme: admin.websiteSettings });
+    return res
+      .status(200)
+      .json({ success: true, theme: admin.websiteSettings });
   } catch (error) {
     console.error("Error fetching theme:", error);
     return res.status(500).json({ success: false, message: "Server error" });
@@ -763,5 +810,5 @@ module.exports = {
   editSubAdminById,
   updateTheme,
   getAdminDashboardStats,
-  getThemeByBranch
+  getThemeByBranch,
 };

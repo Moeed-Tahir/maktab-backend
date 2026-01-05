@@ -1,6 +1,5 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
-const { sendWelcomeEmail } = require("../services/emailServices");
 
 const userSchema = new mongoose.Schema({
     email: {
@@ -40,32 +39,5 @@ const userSchema = new mongoose.Schema({
         default: false
     }
 }, { timestamps: true });
-
-userSchema.pre("save", async function (next) {
-    if (!this.isModified("password")) return next();
-    
-    try {
-        const salt = await bcrypt.genSalt(10);
-        this.password = await bcrypt.hash(this.password, salt);
-        next();
-    } catch (error) {
-        next(error);
-    }
-});
-
-userSchema.post("save", async function (doc, next) {
-    try {
-        if (this.isNew) {
-            await sendWelcomeEmail({
-                email: this.email,
-                role: this.role
-            });
-        }
-        next();
-    } catch (error) {
-        console.error("Failed to send welcome email:", error);
-        next();
-    }
-});
 
 module.exports = mongoose.models.User || mongoose.model("User", userSchema);

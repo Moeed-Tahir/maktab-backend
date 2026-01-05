@@ -11,6 +11,7 @@ const Payment = require("../models/Payments");
 const Admin = require("../models/Admin");
 
 const mongoose = require("mongoose");
+const { sendWelcomeEmail } = require("../services/emailServices");
 
 const createStudent = async (req, res) => {
   try {
@@ -126,6 +127,11 @@ const createStudent = async (req, res) => {
 
     parent.students.push(student._id);
     await parent.save();
+
+    await sendWelcomeEmail({
+      email: studentEmail,
+      role: "Student",
+    });
 
     return res.status(201).json({
       success: true,
@@ -1453,7 +1459,7 @@ const getParentChildById = async (req, res) => {
     const skip = (pageNum - 1) * limitNum;
 
     const parent = await Parent.findById(parentId).lean();
-    
+
     if (!parent) {
       return res.status(404).json({
         success: false,
@@ -1462,26 +1468,28 @@ const getParentChildById = async (req, res) => {
     }
 
     let searchQuery = { parent: parentId };
-    
+
     if (search) {
       searchQuery.$or = [
-        { studentName: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } }
+        { studentName: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+        { phone: { $regex: search, $options: "i" } },
       ];
     }
 
     const totalStudents = await Student.countDocuments(searchQuery);
 
     const students = await Student.find(searchQuery)
-      .select("studentName phone address dateOfBirth gender classes email parent")
+      .select(
+        "studentName phone address dateOfBirth gender classes email parent"
+      )
       .populate({ path: "classes", select: "className" })
-      .populate({ path: "parent", select: "fullName" }) 
+      .populate({ path: "parent", select: "fullName" })
       .skip(skip)
       .limit(limitNum)
       .lean();
 
-    const studentsWithParentName = students.map(student => ({
+    const studentsWithParentName = students.map((student) => ({
       ...student,
       parentName: student.parent?.fullName || "",
       parent: undefined,
@@ -1499,8 +1507,8 @@ const getParentChildById = async (req, res) => {
         totalStudents,
         hasNextPage: pageNum < totalPages,
         hasPrevPage: pageNum > 1,
-        limit: limitNum
-      }
+        limit: limitNum,
+      },
     });
   } catch (error) {
     console.error("Error fetching parent and students:", error);

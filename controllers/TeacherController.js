@@ -8,23 +8,24 @@ const Timetable = require("../models/TimeTable");
 const Admin = require("../models/Admin");
 
 const mongoose = require("mongoose");
+const { sendWelcomeEmail } = require("../services/emailServices");
 
 const createTeacher = async (req, res) => {
   try {
     const { adminId } = req.body;
-    
+
     if (!adminId) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: "Admin ID is required" 
+        message: "Admin ID is required",
       });
     }
 
     const adminExists = await Admin.findById(adminId);
     if (!adminExists) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: "Admin not found" 
+        message: "Admin not found",
       });
     }
 
@@ -43,24 +44,24 @@ const createTeacher = async (req, res) => {
       assignedClasses = [],
       subjects = [],
       languages = [],
-      status = "Active"
+      status = "Active",
     } = req.body;
 
-    const requiredFields = ['fullName', 'email', 'password', 'phone'];
-    const missingFields = requiredFields.filter(field => !req.body[field]);
-    
+    const requiredFields = ["fullName", "email", "password", "phone"];
+    const missingFields = requiredFields.filter((field) => !req.body[field]);
+
     if (missingFields.length > 0) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: `Missing required fields: ${missingFields.join(', ')}` 
+        message: `Missing required fields: ${missingFields.join(", ")}`,
       });
     }
 
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: "Email already exists" 
+        message: "Email already exists",
       });
     }
 
@@ -70,7 +71,7 @@ const createTeacher = async (req, res) => {
       email,
       password: hashedPassword,
       role: "Teacher",
-      createdBy: adminId
+      createdBy: adminId,
     });
 
     const teacher = await Teacher.create({
@@ -90,11 +91,16 @@ const createTeacher = async (req, res) => {
       subjects,
       languages,
       status,
-      createdBy: adminId
+      createdBy: adminId,
     });
 
     user.teacher = teacher._id;
     await user.save();
+
+    await sendWelcomeEmail({
+      email: email,
+      role: "Teacher",
+    });
 
     return res.status(201).json({
       success: true,
@@ -102,29 +108,29 @@ const createTeacher = async (req, res) => {
       data: {
         teacher: {
           ...teacher._doc,
-          password: undefined 
+          password: undefined,
         },
         user: {
           ...user._doc,
-          password: undefined 
-        }
-      }
+          password: undefined,
+        },
+      },
     });
   } catch (error) {
     console.error("❌ createTeacher error:", error);
-    
-    if (error.name === 'ValidationError') {
-      return res.status(400).json({ 
+
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
         success: false,
         message: "Validation error",
-        errors: Object.values(error.errors).map(err => err.message)
+        errors: Object.values(error.errors).map((err) => err.message),
       });
     }
-    
-    return res.status(500).json({ 
+
+    return res.status(500).json({
       success: false,
       message: "Internal server error",
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 };
@@ -138,18 +144,18 @@ const getAllTeachers = async (req, res) => {
       search,
       sortBy = "fullName",
       sortOrder = "asc",
-      adminId
+      adminId,
     } = req.body;
 
     if (!adminId) {
       return res.status(400).json({
         success: false,
-        message: "Admin ID is required"
+        message: "Admin ID is required",
       });
     }
 
     const filter = {
-      createdBy: adminId
+      createdBy: adminId,
     };
 
     if (status && status !== "all") {
@@ -194,14 +200,14 @@ const getAllTeachers = async (req, res) => {
         totalTeachers,
         hasNextPage: parseInt(page) < totalPages,
         hasPrevPage: parseInt(page) > 1,
-        itemsPerPage: parseInt(limit)
+        itemsPerPage: parseInt(limit),
       },
     });
   } catch (error) {
     console.error("❌ Error fetching teachers:", error);
     return res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 };
@@ -337,7 +343,7 @@ const getTeachersName = async (req, res) => {
     if (!adminId) {
       return res.status(400).json({
         success: false,
-        message: "Admin ID is required"
+        message: "Admin ID is required",
       });
     }
 
@@ -347,7 +353,7 @@ const getTeachersName = async (req, res) => {
         _id: 1,
         specialization: 1,
         fullName: 1,
-        status: 1
+        status: 1,
       }
     ).lean();
 
@@ -360,7 +366,7 @@ const getTeachersName = async (req, res) => {
     console.error("❌ Error fetching teacher names:", error);
     return res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 };

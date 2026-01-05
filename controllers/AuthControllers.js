@@ -43,16 +43,33 @@ const register = async (req, res) => {
 const login = async (req, res) => {
   try {
     const { email, password, role } = req.body;
+    console.log("Login attempt:", { email, role });
+
+    if (!email || !password || !role) {
+      console.log("Missing fields in request body");
+      return res.status(400).json({ message: "Email, password, and role are required" });
+    }
 
     const user = await User.findOne({ email: email.trim().toLowerCase() });
-    if (!user) return res.status(400).json({ message: "Invalid credentials" });
+    console.log("User fetched from DB:", user);
 
-    if (user.role !== role)
+    if (!user) {
+      console.log("No user found with this email");
+      return res.status(400).json({ message: "Invalid credentials" });
+    }
+
+    if (user.role.toLowerCase() !== role.toLowerCase()) {
+      console.log(`User role mismatch. Expected: ${role}, Found: ${user.role}`);
       return res.status(403).json({ message: `User is not a ${role}` });
+    }
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch)
+    console.log("Password match result:", isMatch);
+
+    if (!isMatch) {
+      console.log("Password did not match");
       return res.status(400).json({ message: "Invalid credentials" });
+    }
 
     let roleId = null;
     let permissions = [];
@@ -61,38 +78,51 @@ const login = async (req, res) => {
     switch (role.toLowerCase()) {
       case "teacher":
         const teacher = await Teacher.findOne({ user: user._id });
+        console.log("Teacher profile fetched:", teacher);
         roleId = teacher ? teacher._id : null;
         break;
+
       case "student":
         const student = await Student.findOne({ user: user._id });
+        console.log("Student profile fetched:", student);
         roleId = student ? student._id : null;
         break;
+
       case "parent":
         const parent = await Parent.findOne({ user: user._id });
+        console.log("Parent profile fetched:", parent);
         roleId = parent ? parent._id : null;
         break;
+
       case "admin":
         const admin = await Admin.findOne({ email: user.email });
+        console.log("Admin profile fetched:", admin);
         roleId = admin ? admin._id : null;
         break;
+
       case "subadmin":
         const parentAdmin = await Admin.findOne({
           "subAdmins.email": user.email,
         });
+        console.log("Parent admin for subadmin fetched:", parentAdmin);
+
         if (parentAdmin) {
           const subAdmin = parentAdmin.subAdmins.find(
             (sa) => sa.email === user.email
           );
+          console.log("Subadmin found:", subAdmin);
           roleId = subAdmin ? subAdmin._id : null;
           permissions = subAdmin ? subAdmin.permissions : [];
           adminId = parentAdmin._id;
         }
         break;
+
       default:
         roleId = user._id;
     }
 
     if (!roleId) {
+      console.log(`${role} profile not found`);
       return res.status(404).json({ message: `${role} profile not found` });
     }
 
@@ -108,8 +138,11 @@ const login = async (req, res) => {
       response.adminId = adminId;
     }
 
+    console.log("Login successful, response:", response);
     return res.status(200).json(response);
+
   } catch (error) {
+    console.error("Error during login:", error);
     return res.status(500).json({ message: error.message });
   }
 };

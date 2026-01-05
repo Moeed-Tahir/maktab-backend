@@ -9,6 +9,7 @@ const mongoose = require("mongoose");
 const Attendance = require("../models/Attendance");
 const Event = require("../models/Event");
 const Admin = require("../models/Admin");
+const { sendWelcomeEmail } = require("../services/emailServices");
 
 const calculateNextPaymentDate = (frequency) => {
   const date = new Date();
@@ -33,14 +34,18 @@ const createParent = async (req, res) => {
 
   try {
     const { adminId, parent: parentData, children } = req.body;
-    
-    if (!adminId) return res.status(400).json({ message: "adminId is required" });
-    
+
+    if (!adminId)
+      return res.status(400).json({ message: "adminId is required" });
+
     const adminExists = await Admin.findById(adminId);
-    if (!adminExists) return res.status(404).json({ message: "Admin not found" });
-    
+    if (!adminExists)
+      return res.status(404).json({ message: "Admin not found" });
+
     if (!parentData || !children?.length) {
-      return res.status(400).json({ message: "Parent & at least one child required" });
+      return res
+        .status(400)
+        .json({ message: "Parent & at least one child required" });
     }
 
     const child = children[0];
@@ -55,20 +60,22 @@ const createParent = async (req, res) => {
       address: { line1: parentData.address },
     });
 
-    await stripe.paymentMethods.attach(parentData.paymentMethodId, { customer: stripeCustomer.id });
+    await stripe.paymentMethods.attach(parentData.paymentMethodId, {
+      customer: stripeCustomer.id,
+    });
 
     const parentUser = await User.create({
       email: parentData.email,
       password: hashedParentPassword,
       role: "Parent",
-      createdBy: adminId
+      createdBy: adminId,
     });
 
     const studentUser = await User.create({
       email: child.email,
       password: hashedStudentPassword,
       role: "Student",
-      createdBy: adminId
+      createdBy: adminId,
     });
 
     const parent = await Parent.create({
@@ -97,12 +104,16 @@ const createParent = async (req, res) => {
     parent.students.push(student._id);
     await parent.save();
 
+    await sendWelcomeEmail({
+      email: parentData.email,
+      role: "Parent",
+    });
+
     return res.status(201).json({
       message: "Parent & Student created successfully",
       parent,
       student,
     });
-
   } catch (error) {
     if (stripeCustomer) await stripe.customers.del(stripeCustomer.id);
     console.error("❌ createParent:", error);
@@ -127,17 +138,14 @@ const deleteParent = async (req, res) => {
       console.error("Stripe customer deletion failed:", err.message);
     }
 
-    const studentIds = parent.students.map(s => s._id);
+    const studentIds = parent.students.map((s) => s._id);
 
-    await User.deleteMany({ _id: { $in: parent.students.map(s => s.user) } });
+    await User.deleteMany({ _id: { $in: parent.students.map((s) => s.user) } });
 
     await Student.deleteMany({ _id: { $in: studentIds } });
 
     await Payment.deleteMany({
-      $or: [
-        { parent: parent._id },
-        { student: { $in: studentIds } }
-      ]
+      $or: [{ parent: parent._id }, { student: { $in: studentIds } }],
     });
 
     await User.findByIdAndDelete(parent.user);
@@ -145,12 +153,14 @@ const deleteParent = async (req, res) => {
     await Parent.findByIdAndDelete(parentId);
 
     return res.status(200).json({
-      message: "Parent and all related students, payments, and user accounts deleted successfully."
+      message:
+        "Parent and all related students, payments, and user accounts deleted successfully.",
     });
-
   } catch (error) {
     console.error("Error deleting parent:", error);
-    return res.status(500).json({ message: "Server error", error: error.message });
+    return res
+      .status(500)
+      .json({ message: "Server error", error: error.message });
   }
 };
 
@@ -162,13 +172,13 @@ const getAllParents = async (req, res) => {
       search = "",
       sortBy = "createdAt",
       sortOrder = "desc",
-      adminId
+      adminId,
     } = req.body;
 
     if (!adminId) {
       return res.status(400).json({
         success: false,
-        message: "Admin ID is required"
+        message: "Admin ID is required",
       });
     }
 
@@ -176,19 +186,21 @@ const getAllParents = async (req, res) => {
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    const searchQuery = search ? {
-      $or: [
-        { fullName: { $regex: search, $options: "i" } },
-        { email: { $regex: search, $options: "i" } },
-        { phone: { $regex: search, $options: "i" } },
-        { identityNumber: { $regex: search, $options: "i" } }
-      ]
-    } : {};
+    const searchQuery = search
+      ? {
+          $or: [
+            { fullName: { $regex: search, $options: "i" } },
+            { email: { $regex: search, $options: "i" } },
+            { phone: { $regex: search, $options: "i" } },
+            { identityNumber: { $regex: search, $options: "i" } },
+          ],
+        }
+      : {};
 
     const filterQuery = {
       ...searchQuery,
       addToWaitList: false,
-      createdBy: adminId
+      createdBy: adminId,
     };
 
     const total = await Parent.countDocuments(filterQuery);
@@ -209,15 +221,14 @@ const getAllParents = async (req, res) => {
         totalItems: total,
         itemsPerPage: limitNum,
         hasNextPage: pageNum < Math.ceil(total / limitNum),
-        hasPrevPage: pageNum > 1
-      }
+        hasPrevPage: pageNum > 1,
+      },
     });
-
   } catch (error) {
     console.error("Error fetching parents:", error);
     return res.status(500).json({
       success: false,
-      message: "Internal server error"
+      message: "Internal server error",
     });
   }
 };
@@ -230,13 +241,13 @@ const getAllWaitlistParents = async (req, res) => {
       search = "",
       sortBy = "createdAt",
       sortOrder = "desc",
-      adminId
+      adminId,
     } = req.body;
 
     if (!adminId) {
       return res.status(400).json({
         success: false,
-        message: "Admin ID is required"
+        message: "Admin ID is required",
       });
     }
 
@@ -244,19 +255,21 @@ const getAllWaitlistParents = async (req, res) => {
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    const searchQuery = search ? {
-      $or: [
-        { fullName: { $regex: search, $options: "i" } },
-        { email: { $regex: search, $options: "i" } },
-        { phone: { $regex: search, $options: "i" } },
-        { identityNumber: { $regex: search, $options: "i" } }
-      ]
-    } : {};
+    const searchQuery = search
+      ? {
+          $or: [
+            { fullName: { $regex: search, $options: "i" } },
+            { email: { $regex: search, $options: "i" } },
+            { phone: { $regex: search, $options: "i" } },
+            { identityNumber: { $regex: search, $options: "i" } },
+          ],
+        }
+      : {};
 
     const filterQuery = {
       ...searchQuery,
       addToWaitList: true,
-      createdBy: adminId
+      createdBy: adminId,
     };
 
     const total = await Parent.countDocuments(filterQuery);
@@ -275,15 +288,14 @@ const getAllWaitlistParents = async (req, res) => {
         currentPage: pageNum,
         totalPages: Math.ceil(total / limitNum),
         totalItems: total,
-        itemsPerPage: limitNum
-      }
+        itemsPerPage: limitNum,
+      },
     });
-
   } catch (error) {
     console.error("Error fetching waitlist parents:", error);
     return res.status(500).json({
       success: false,
-      message: "Internal server error"
+      message: "Internal server error",
     });
   }
 };
@@ -295,7 +307,7 @@ const getAllParentsWithStudents = async (req, res) => {
     if (!adminId) {
       return res.status(400).json({
         success: false,
-        message: "Admin ID is required"
+        message: "Admin ID is required",
       });
     }
 
@@ -305,14 +317,13 @@ const getAllParentsWithStudents = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      data: parents
+      data: parents,
     });
-
   } catch (error) {
     console.error("Error fetching parents with students:", error);
     return res.status(500).json({
       success: false,
-      message: "Internal server error"
+      message: "Internal server error",
     });
   }
 };
@@ -324,7 +335,7 @@ const getParentById = async (req, res) => {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid or missing parent ID"
+        message: "Invalid or missing parent ID",
       });
     }
 
@@ -335,20 +346,19 @@ const getParentById = async (req, res) => {
     if (!parent) {
       return res.status(404).json({
         success: false,
-        message: "Parent not found"
+        message: "Parent not found",
       });
     }
 
     return res.status(200).json({
       success: true,
-      data: parent
+      data: parent,
     });
-
   } catch (error) {
     console.error("Error fetching parent by ID:", error);
     return res.status(500).json({
       success: false,
-      message: "Internal server error"
+      message: "Internal server error",
     });
   }
 };
@@ -360,7 +370,7 @@ const addToWaitList = async (req, res) => {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid or missing parent ID"
+        message: "Invalid or missing parent ID",
       });
     }
 
@@ -369,14 +379,14 @@ const addToWaitList = async (req, res) => {
     if (!parent) {
       return res.status(404).json({
         success: false,
-        message: "Parent not found"
+        message: "Parent not found",
       });
     }
 
     if (parent.addToWaitList) {
       return res.status(400).json({
         success: false,
-        message: "Parent is already on waitlist"
+        message: "Parent is already on waitlist",
       });
     }
 
@@ -390,15 +400,14 @@ const addToWaitList = async (req, res) => {
         id: parent._id,
         fullName: parent.fullName,
         email: parent.email,
-        addToWaitList: parent.addToWaitList
-      }
+        addToWaitList: parent.addToWaitList,
+      },
     });
-
   } catch (error) {
     console.error("Error adding parent to waitlist:", error);
     return res.status(500).json({
       success: false,
-      message: "Internal server error"
+      message: "Internal server error",
     });
   }
 };
@@ -410,7 +419,7 @@ const removeFromWaitList = async (req, res) => {
     if (!id || !mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({
         success: false,
-        message: "Invalid or missing parent ID"
+        message: "Invalid or missing parent ID",
       });
     }
 
@@ -419,14 +428,14 @@ const removeFromWaitList = async (req, res) => {
     if (!parent) {
       return res.status(404).json({
         success: false,
-        message: "Parent not found"
+        message: "Parent not found",
       });
     }
 
     if (!parent.addToWaitList) {
       return res.status(400).json({
         success: false,
-        message: "Parent is not on waitlist"
+        message: "Parent is not on waitlist",
       });
     }
 
@@ -435,20 +444,20 @@ const removeFromWaitList = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Parent and associated students removed from waitlist successfully",
+      message:
+        "Parent and associated students removed from waitlist successfully",
       data: {
         id: parent._id,
         fullName: parent.fullName,
         email: parent.email,
-        addToWaitList: parent.addToWaitList
-      }
+        addToWaitList: parent.addToWaitList,
+      },
     });
-
   } catch (error) {
     console.error("Error removing parent from waitlist:", error);
     return res.status(500).json({
       success: false,
-      message: "Internal server error"
+      message: "Internal server error",
     });
   }
 };
@@ -457,31 +466,26 @@ const processCardPayment = async (req, res) => {
   let paymentIntent;
 
   try {
-    const {
-      amount,
-      selectedDate,
-      paymentMethodId,
-      cardDetails,
-      invoiceId
-    } = req.body;
+    const { amount, selectedDate, paymentMethodId, cardDetails, invoiceId } =
+      req.body;
 
     if (!amount || !selectedDate || !paymentMethodId || !cardDetails) {
       return res.status(400).json({
-        message: "Amount, date, payment method, and card details are required"
+        message: "Amount, date, payment method, and card details are required",
       });
     }
 
     const invoice = await Invoice.findById(invoiceId).populate("parent");
     if (!invoice) {
       return res.status(404).json({
-        message: "Invoice not found"
+        message: "Invoice not found",
       });
     }
 
     const parent = invoice.parent;
     if (!parent) {
       return res.status(404).json({
-        message: "Parent not found"
+        message: "Parent not found",
       });
     }
 
@@ -496,19 +500,19 @@ const processCardPayment = async (req, res) => {
           address: { line1: parent.address },
           metadata: {
             parentId: parent._id.toString(),
-            identityNumber: parent.identityNumber
+            identityNumber: parent.identityNumber,
           },
         });
 
         stripeCustomerId = stripeCustomer.id;
 
         await Parent.findByIdAndUpdate(parent._id, {
-          "cardDetail.stripeCustomerId": stripeCustomerId
+          "cardDetail.stripeCustomerId": stripeCustomerId,
         });
       } catch (stripeError) {
         console.error("Stripe customer creation error:", stripeError);
         return res.status(400).json({
-          message: `Stripe error: ${stripeError.message}`
+          message: `Stripe error: ${stripeError.message}`,
         });
       }
     }
@@ -534,27 +538,26 @@ const processCardPayment = async (req, res) => {
             expMonth: cardDetails.expMonth,
             expYear: cardDetails.expYear,
             isDefault: true,
-          }
-        }
+          },
+        },
       });
-
     } catch (stripeError) {
       console.error("Stripe payment method error:", stripeError);
       return res.status(400).json({
-        message: `Payment method error: ${stripeError.message}`
+        message: `Payment method error: ${stripeError.message}`,
       });
     }
 
     try {
-      const baseUrl = 'http://localhost:3000';
+      const baseUrl = "http://localhost:3000";
       const returnUrl = `${baseUrl}/dashboard/finance/invoice/${invoiceId}/payment-done`;
 
       try {
         new URL(returnUrl);
       } catch (urlError) {
-        console.error('Invalid return URL:', returnUrl);
+        console.error("Invalid return URL:", returnUrl);
         return res.status(500).json({
-          message: "Invalid return URL configuration"
+          message: "Invalid return URL configuration",
         });
       }
 
@@ -569,17 +572,18 @@ const processCardPayment = async (req, res) => {
           parentId: parent._id.toString(),
           invoiceId: invoiceId.toString(),
           parentName: parent.fullName,
-          invoiceNumber: invoice.invoiceNumber
-        }
+          invoiceNumber: invoice.invoiceNumber,
+        },
       });
 
-      if (paymentIntent.status === 'succeeded') {
+      if (paymentIntent.status === "succeeded") {
         const updatedInvoice = await Invoice.findById(invoiceId);
         if (updatedInvoice) {
           updatedInvoice.status = "paid";
           updatedInvoice.paidAmount = parseFloat(amount);
           updatedInvoice.paidAt = new Date(selectedDate);
-          updatedInvoice.paymentMethod = parent.cardDetail?.paymentMethods?.[0]?._id || null;
+          updatedInvoice.paymentMethod =
+            parent.cardDetail?.paymentMethods?.[0]?._id || null;
           updatedInvoice.paymentReference = paymentIntent.id;
           updatedInvoice.stripePaymentIntentId = paymentIntent.id;
 
@@ -594,55 +598,52 @@ const processCardPayment = async (req, res) => {
             status: paymentIntent.status,
             invoiceId: invoiceId,
             invoiceNumber: invoice.invoiceNumber,
-            paidAt: new Date(selectedDate)
+            paidAt: new Date(selectedDate),
           },
           parent: {
             id: parent._id,
             fullName: parent.fullName,
             email: parent.email,
-            stripeCustomerId: stripeCustomerId
+            stripeCustomerId: stripeCustomerId,
           },
           invoice: {
             id: invoice._id,
             status: "paid",
             paidAmount: amount,
-            paidAt: selectedDate
-          }
+            paidAt: selectedDate,
+          },
         });
-
-      } else if (paymentIntent.status === 'requires_action') {
+      } else if (paymentIntent.status === "requires_action") {
         return res.status(200).json({
           message: "Payment requires additional authentication",
           requiresAction: true,
           clientSecret: paymentIntent.client_secret,
-          paymentIntentId: paymentIntent.id
+          paymentIntentId: paymentIntent.id,
         });
       } else {
         await Invoice.findByIdAndUpdate(invoiceId, {
           status: "pending",
           paymentReference: paymentIntent.id,
-          stripePaymentIntentId: paymentIntent.id
+          stripePaymentIntentId: paymentIntent.id,
         });
 
         return res.status(400).json({
-          message: `Payment failed: ${paymentIntent.status}`
+          message: `Payment failed: ${paymentIntent.status}`,
         });
       }
-
     } catch (paymentError) {
       console.error("Stripe payment processing error:", paymentError);
 
       await Invoice.findByIdAndUpdate(invoiceId, {
         status: "pending",
         paymentReference: paymentIntent?.id || null,
-        stripePaymentIntentId: paymentIntent?.id || null
+        stripePaymentIntentId: paymentIntent?.id || null,
       });
 
       return res.status(400).json({
-        message: `Payment processing error: ${paymentError.message}`
+        message: `Payment processing error: ${paymentError.message}`,
       });
     }
-
   } catch (error) {
     console.error("❌ Error processing card payment:", error);
 
@@ -655,7 +656,7 @@ const processCardPayment = async (req, res) => {
     }
 
     return res.status(500).json({
-      message: error.message
+      message: error.message,
     });
   }
 };
@@ -667,14 +668,14 @@ const addCardDetail = async (req, res) => {
     if (!parentId) {
       return res.status(400).json({
         success: false,
-        message: "Parent ID is required"
+        message: "Parent ID is required",
       });
     }
 
     if (!cardData || !cardData.paymentMethodId) {
       return res.status(400).json({
         success: false,
-        message: "Card data with paymentMethodId is required"
+        message: "Card data with paymentMethodId is required",
       });
     }
 
@@ -682,11 +683,13 @@ const addCardDetail = async (req, res) => {
     if (!parent) {
       return res.status(404).json({
         success: false,
-        message: "Parent not found"
+        message: "Parent not found",
       });
     }
 
-    const isFirstCard = !parent.cardDetail?.paymentMethods || parent.cardDetail.paymentMethods.length === 0;
+    const isFirstCard =
+      !parent.cardDetail?.paymentMethods ||
+      parent.cardDetail.paymentMethods.length === 0;
 
     const newCard = {
       paymentMethodId: cardData.paymentMethodId,
@@ -699,12 +702,13 @@ const addCardDetail = async (req, res) => {
 
     if (!parent.cardDetail) {
       parent.cardDetail = {
-        stripeCustomerId: cardData.stripeCustomerId || parent.cardDetail?.stripeCustomerId,
-        paymentMethods: [newCard]
+        stripeCustomerId:
+          cardData.stripeCustomerId || parent.cardDetail?.stripeCustomerId,
+        paymentMethods: [newCard],
       };
     } else {
       if (newCard.isDefault && parent.cardDetail.paymentMethods.length > 0) {
-        parent.cardDetail.paymentMethods.forEach(card => {
+        parent.cardDetail.paymentMethods.forEach((card) => {
           card.isDefault = false;
         });
       }
@@ -721,14 +725,13 @@ const addCardDetail = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Card added successfully",
-      card: newCard
+      card: newCard,
     });
-
   } catch (error) {
     console.error("Error adding card detail:", error);
     return res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 };
@@ -741,14 +744,14 @@ const setCardDefault = async (req, res) => {
     if (!parentId) {
       return res.status(400).json({
         success: false,
-        message: "Parent ID is required"
+        message: "Parent ID is required",
       });
     }
 
     if (!paymentMethodId) {
       return res.status(400).json({
         success: false,
-        message: "Payment Method ID is required"
+        message: "Payment Method ID is required",
       });
     }
 
@@ -756,29 +759,33 @@ const setCardDefault = async (req, res) => {
     if (!parent) {
       return res.status(404).json({
         success: false,
-        message: "Parent not found"
+        message: "Parent not found",
       });
     }
 
-    if (!parent.cardDetail || !parent.cardDetail.paymentMethods || parent.cardDetail.paymentMethods.length === 0) {
+    if (
+      !parent.cardDetail ||
+      !parent.cardDetail.paymentMethods ||
+      parent.cardDetail.paymentMethods.length === 0
+    ) {
       return res.status(404).json({
         success: false,
-        message: "No payment methods found for this parent"
+        message: "No payment methods found for this parent",
       });
     }
 
     const cardToSetDefault = parent.cardDetail.paymentMethods.find(
-      card => card.paymentMethodId === paymentMethodId
+      (card) => card.paymentMethodId === paymentMethodId
     );
 
     if (!cardToSetDefault) {
       return res.status(404).json({
         success: false,
-        message: "Payment method not found"
+        message: "Payment method not found",
       });
     }
 
-    parent.cardDetail.paymentMethods.forEach(card => {
+    parent.cardDetail.paymentMethods.forEach((card) => {
       card.isDefault = false;
     });
 
@@ -791,14 +798,13 @@ const setCardDefault = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Card set as default successfully",
-      defaultCard: cardToSetDefault
+      defaultCard: cardToSetDefault,
     });
-
   } catch (error) {
     console.error("Error setting card as default:", error);
     return res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 };
@@ -811,14 +817,14 @@ const removeCardDetail = async (req, res) => {
     if (!parentId) {
       return res.status(400).json({
         success: false,
-        message: "Parent ID is required"
+        message: "Parent ID is required",
       });
     }
 
     if (!paymentMethodId) {
       return res.status(400).json({
         success: false,
-        message: "Payment Method ID is required"
+        message: "Payment Method ID is required",
       });
     }
 
@@ -826,25 +832,29 @@ const removeCardDetail = async (req, res) => {
     if (!parent) {
       return res.status(404).json({
         success: false,
-        message: "Parent not found"
+        message: "Parent not found",
       });
     }
 
-    if (!parent.cardDetail || !parent.cardDetail.paymentMethods || parent.cardDetail.paymentMethods.length === 0) {
+    if (
+      !parent.cardDetail ||
+      !parent.cardDetail.paymentMethods ||
+      parent.cardDetail.paymentMethods.length === 0
+    ) {
       return res.status(404).json({
         success: false,
-        message: "No payment methods found for this parent"
+        message: "No payment methods found for this parent",
       });
     }
 
     const cardToRemove = parent.cardDetail.paymentMethods.find(
-      card => card.paymentMethodId === paymentMethodId
+      (card) => card.paymentMethodId === paymentMethodId
     );
 
     if (!cardToRemove) {
       return res.status(404).json({
         success: false,
-        message: "Payment method not found"
+        message: "Payment method not found",
       });
     }
 
@@ -852,12 +862,13 @@ const removeCardDetail = async (req, res) => {
     const remainingCardsCount = parent.cardDetail.paymentMethods.length - 1;
 
     parent.cardDetail.paymentMethods = parent.cardDetail.paymentMethods.filter(
-      card => card.paymentMethodId !== paymentMethodId
+      (card) => card.paymentMethodId !== paymentMethodId
     );
 
     if (wasDefault && remainingCardsCount > 0) {
       parent.cardDetail.paymentMethods[0].isDefault = true;
-      parent.cardDetail.defaultPaymentMethodId = parent.cardDetail.paymentMethods[0].paymentMethodId;
+      parent.cardDetail.defaultPaymentMethodId =
+        parent.cardDetail.paymentMethods[0].paymentMethodId;
     } else if (remainingCardsCount === 0) {
       parent.cardDetail.defaultPaymentMethodId = null;
     }
@@ -868,14 +879,13 @@ const removeCardDetail = async (req, res) => {
       success: true,
       message: "Card removed successfully",
       removedCard: cardToRemove,
-      remainingCards: parent.cardDetail.paymentMethods.length
+      remainingCards: parent.cardDetail.paymentMethods.length,
     });
-
   } catch (error) {
     console.error("Error removing card:", error);
     return res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
   }
 };
@@ -894,8 +904,8 @@ const getParentDashboardStats = async (req, res) => {
         select: "studentName email classes",
         populate: {
           path: "classes",
-          select: "className"
-        }
+          select: "className",
+        },
       })
       .lean();
 
@@ -903,22 +913,29 @@ const getParentDashboardStats = async (req, res) => {
       return res.status(404).json({ error: "Parent not found" });
     }
 
-    const studentIds = parent.students.map(student => student._id);
+    const studentIds = parent.students.map((student) => student._id);
 
     const currentDate = new Date();
     const currentYear = currentDate.getFullYear();
     const currentMonth = currentDate.getMonth();
 
-    const [keyMetrics, monthlyAttendance, feeStats, upcomingEvents, recentPayments, pendingPayments, childAttendance] =
-      await Promise.all([
-        getKeyMetrics(parentId, studentIds, currentYear),
-        getMonthlyAttendance(studentIds, currentYear),
-        getFeeStats(parentId, studentIds),
-        getUpcomingEvents(studentIds),
-        getRecentPayments(parentId),
-        getPendingPayments(parentId),
-        getChildAttendanceStats(parent.students)
-      ]);
+    const [
+      keyMetrics,
+      monthlyAttendance,
+      feeStats,
+      upcomingEvents,
+      recentPayments,
+      pendingPayments,
+      childAttendance,
+    ] = await Promise.all([
+      getKeyMetrics(parentId, studentIds, currentYear),
+      getMonthlyAttendance(studentIds, currentYear),
+      getFeeStats(parentId, studentIds),
+      getUpcomingEvents(studentIds),
+      getRecentPayments(parentId),
+      getPendingPayments(parentId),
+      getChildAttendanceStats(parent.students),
+    ]);
 
     const dashboardData = {
       keyMetrics,
@@ -931,13 +948,13 @@ const getParentDashboardStats = async (req, res) => {
       parentInfo: {
         fullName: parent.fullName,
         email: parent.email,
-        children: parent.students.map(student => ({
+        children: parent.students.map((student) => ({
           id: student._id,
           name: student.studentName,
           className: student.class?.className || "Not Assigned",
-          email: student.email
-        }))
-      }
+          email: student.email,
+        })),
+      },
     };
 
     res.status(200).json(dashboardData);
@@ -952,7 +969,7 @@ const getKeyMetrics = async (parentId, studentIds, year) => {
 
   const pendingInvoices = await Invoice.find({
     parent: parentId,
-    status: "pending"
+    status: "pending",
   });
 
   const pendingFees = pendingInvoices.reduce((total, invoice) => {
@@ -964,14 +981,14 @@ const getKeyMetrics = async (parentId, studentIds, year) => {
 
   const monthlyAttendance = await Attendance.find({
     date: { $gte: startOfMonth, $lte: endOfMonth },
-    "records.studentId": { $in: studentIds }
+    "records.studentId": { $in: studentIds },
   });
 
   let totalRecords = 0;
   let presentRecords = 0;
 
-  monthlyAttendance.forEach(attendance => {
-    attendance.records.forEach(record => {
+  monthlyAttendance.forEach((attendance) => {
+    attendance.records.forEach((record) => {
       if (studentIds.includes(record.studentId.toString())) {
         totalRecords++;
         if (record.status === "Present") {
@@ -981,7 +998,8 @@ const getKeyMetrics = async (parentId, studentIds, year) => {
     });
   });
 
-  const attendanceRate = totalRecords > 0 ? Math.round((presentRecords / totalRecords) * 100) : 0;
+  const attendanceRate =
+    totalRecords > 0 ? Math.round((presentRecords / totalRecords) * 100) : 0;
 
   const eventsCount = await getEventsCount(studentIds);
 
@@ -989,13 +1007,26 @@ const getKeyMetrics = async (parentId, studentIds, year) => {
     myChildren,
     pendingFees,
     attendanceRate,
-    eventsCount
+    eventsCount,
   };
 };
 
 const getMonthlyAttendance = async (studentIds, year) => {
   const monthlyData = [];
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
 
   for (let month = 0; month < 12; month++) {
     const startDate = new Date(year, month, 1);
@@ -1003,7 +1034,7 @@ const getMonthlyAttendance = async (studentIds, year) => {
 
     const monthlyAttendance = await Attendance.find({
       date: { $gte: startDate, $lte: endDate },
-      "records.studentId": { $in: studentIds }
+      "records.studentId": { $in: studentIds },
     });
 
     let totalRecords = 0;
@@ -1011,8 +1042,8 @@ const getMonthlyAttendance = async (studentIds, year) => {
     let absentRecords = 0;
     let lateRecords = 0;
 
-    monthlyAttendance.forEach(attendance => {
-      attendance.records.forEach(record => {
+    monthlyAttendance.forEach((attendance) => {
+      attendance.records.forEach((record) => {
         if (studentIds.includes(record.studentId.toString())) {
           totalRecords++;
           if (record.status === "Present") {
@@ -1026,9 +1057,12 @@ const getMonthlyAttendance = async (studentIds, year) => {
       });
     });
 
-    const presentPercentage = totalRecords > 0 ? Math.round((presentRecords / totalRecords) * 100) : 0;
-    const absentPercentage = totalRecords > 0 ? Math.round((absentRecords / totalRecords) * 100) : 0;
-    const latePercentage = totalRecords > 0 ? Math.round((lateRecords / totalRecords) * 100) : 0;
+    const presentPercentage =
+      totalRecords > 0 ? Math.round((presentRecords / totalRecords) * 100) : 0;
+    const absentPercentage =
+      totalRecords > 0 ? Math.round((absentRecords / totalRecords) * 100) : 0;
+    const latePercentage =
+      totalRecords > 0 ? Math.round((lateRecords / totalRecords) * 100) : 0;
 
     monthlyData.push({
       month: months[month],
@@ -1038,7 +1072,7 @@ const getMonthlyAttendance = async (studentIds, year) => {
       actualPresent: presentRecords,
       actualAbsent: absentRecords,
       actualLate: lateRecords,
-      total: totalRecords
+      total: totalRecords,
     });
   }
 
@@ -1049,7 +1083,7 @@ const getFeeStats = async (parentId, studentIds) => {
   try {
     const successfulPayments = await Payment.find({
       parent: parentId,
-      status: "succeeded"
+      status: "succeeded",
     });
 
     const totalFeesPaid = successfulPayments.reduce((total, payment) => {
@@ -1058,7 +1092,7 @@ const getFeeStats = async (parentId, studentIds) => {
 
     const pendingInvoices = await Invoice.find({
       parent: parentId,
-      status: "pending"
+      status: "pending",
     });
 
     const pendingFees = pendingInvoices.reduce((total, invoice) => {
@@ -1068,7 +1102,7 @@ const getFeeStats = async (parentId, studentIds) => {
     const upcomingInvoice = await Invoice.findOne({
       parent: parentId,
       status: "pending",
-      dueDate: { $gte: new Date() }
+      dueDate: { $gte: new Date() },
     }).sort({ dueDate: 1 });
 
     const nextDueDate = upcomingInvoice ? upcomingInvoice.dueDate : null;
@@ -1076,14 +1110,14 @@ const getFeeStats = async (parentId, studentIds) => {
     return {
       totalFeesPaid,
       pendingFees,
-      nextDueDate
+      nextDueDate,
     };
   } catch (error) {
     console.error("Error in getFeeStats:", error);
     return {
       totalFeesPaid: 0,
       pendingFees: 0,
-      nextDueDate: null
+      nextDueDate: null,
     };
   }
 };
@@ -1094,13 +1128,13 @@ const getUpcomingEvents = async (studentIds) => {
 
     const upcomingEvents = await Event.find({
       date: { $gte: currentDate },
-      status: { $in: ["Upcoming", "Ongoing"] }
+      status: { $in: ["Upcoming", "Ongoing"] },
     })
       .sort({ date: 1, startTime: 1 })
       .limit(5)
       .lean();
 
-    return upcomingEvents.map(event => ({
+    return upcomingEvents.map((event) => ({
       title: event.name,
       date: event.date,
       startTime: event.startTime,
@@ -1108,7 +1142,7 @@ const getUpcomingEvents = async (studentIds) => {
       location: event.location,
       organizer: event.organizer,
       description: event.description,
-      status: event.status
+      status: event.status,
     }));
   } catch (error) {
     console.error("Error in getUpcomingEvents:", error);
@@ -1116,8 +1150,8 @@ const getUpcomingEvents = async (studentIds) => {
       {
         title: "Science Fair",
         date: new Date("2025-01-15T10:00:00"),
-        description: "Annual science fair exhibition"
-      }
+        description: "Annual science fair exhibition",
+      },
     ];
   }
 };
@@ -1132,9 +1166,9 @@ const getEventsCount = async (studentIds) => {
     const eventsCount = await Event.countDocuments({
       date: {
         $gte: currentDate,
-        $lte: thirtyDaysFromNow
+        $lte: thirtyDaysFromNow,
       },
-      status: { $in: ["Upcoming", "Ongoing"] }
+      status: { $in: ["Upcoming", "Ongoing"] },
     });
 
     return eventsCount;
@@ -1148,23 +1182,25 @@ const getRecentPayments = async (parentId) => {
   try {
     const recentPayments = await Payment.find({
       parent: parentId,
-      status: "succeeded"
+      status: "succeeded",
     })
       .populate("student", "studentName")
       .sort({ paymentDate: -1 })
       .limit(4)
       .lean();
 
-    return recentPayments.map(payment => ({
+    return recentPayments.map((payment) => ({
       childName: payment.student?.studentName || "N/A",
-      date: payment.paymentDate ? new Date(payment.paymentDate).toLocaleDateString('en-US', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric'
-      }) : "N/A",
+      date: payment.paymentDate
+        ? new Date(payment.paymentDate).toLocaleDateString("en-US", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+          })
+        : "N/A",
       amount: `-$${payment.amount.toLocaleString()}`, // Changed from paidAmount to amount
       color: "text-red-500",
-      invoiceNumber: payment.invoiceNumber
+      invoiceNumber: payment.invoiceNumber,
     }));
   } catch (error) {
     console.error("Error in getRecentPayments:", error);
@@ -1176,23 +1212,27 @@ const getPendingPayments = async (parentId) => {
   try {
     const pendingPayments = await Invoice.find({
       parent: parentId,
-      status: "pending"
+      status: "pending",
     })
       .populate("student", "studentName")
       .sort({ dueDate: 1 })
       .limit(4)
       .lean();
 
-    return pendingPayments.map(invoice => ({
+    return pendingPayments.map((invoice) => ({
       childName: invoice.student?.studentName || "N/A",
-      date: invoice.dueDate ? new Date(invoice.dueDate).toLocaleDateString('en-US', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric'
-      }) : "N/A",
-      amount: `-$${(invoice.totalAmount - invoice.paidAmount).toLocaleString()}`,
+      date: invoice.dueDate
+        ? new Date(invoice.dueDate).toLocaleDateString("en-US", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+          })
+        : "N/A",
+      amount: `-$${(
+        invoice.totalAmount - invoice.paidAmount
+      ).toLocaleString()}`,
       color: "text-red-500",
-      invoiceNumber: invoice.invoiceNumber
+      invoiceNumber: invoice.invoiceNumber,
     }));
   } catch (error) {
     console.error("Error in getPendingPayments:", error);
@@ -1206,24 +1246,24 @@ const getChildAttendanceStats = async (students) => {
     const currentYear = currentDate.getFullYear();
     const currentMonth = currentDate.getMonth();
 
-    const studentIds = students.map(student => student._id);
+    const studentIds = students.map((student) => student._id);
 
     const startOfMonth = new Date(currentYear, currentMonth, 1);
     const endOfMonth = new Date(currentYear, currentMonth + 1, 0);
 
     const monthlyAttendance = await Attendance.find({
       date: { $gte: startOfMonth, $lte: endOfMonth },
-      "records.studentId": { $in: studentIds }
+      "records.studentId": { $in: studentIds },
     }).lean();
 
-    const childStats = students.map(student => {
+    const childStats = students.map((student) => {
       let presentCount = 0;
       let absentCount = 0;
       let lateCount = 0;
       let totalRecords = 0;
 
-      monthlyAttendance.forEach(attendance => {
-        attendance.records.forEach(record => {
+      monthlyAttendance.forEach((attendance) => {
+        attendance.records.forEach((record) => {
           if (record.studentId.toString() === student._id.toString()) {
             totalRecords++;
             if (record.status === "Present") {
@@ -1237,24 +1277,30 @@ const getChildAttendanceStats = async (students) => {
         });
       });
 
-      const attendancePercentage = totalRecords > 0
-        ? Math.round((presentCount / totalRecords) * 100)
-        : 0;
+      const attendancePercentage =
+        totalRecords > 0 ? Math.round((presentCount / totalRecords) * 100) : 0;
 
       return {
         studentId: student._id,
         studentName: student.studentName,
-        className: student.class?.className || student.classes?.[0]?.className || "Not Assigned",
+        className:
+          student.class?.className ||
+          student.classes?.[0]?.className ||
+          "Not Assigned",
         email: student.email,
         attendance: {
           present: presentCount,
           absent: absentCount,
           late: lateCount,
           total: totalRecords,
-          percentage: attendancePercentage
+          percentage: attendancePercentage,
         },
-        status: attendancePercentage >= 75 ? "Good" :
-          attendancePercentage >= 50 ? "Average" : "Poor"
+        status:
+          attendancePercentage >= 75
+            ? "Good"
+            : attendancePercentage >= 50
+            ? "Average"
+            : "Poor",
       };
     });
 
@@ -1280,7 +1326,9 @@ const processPendingPayments = async () => {
         continue;
       }
 
-      const defaultCard = parent.cardDetail?.paymentMethods?.find(pm => pm.isDefault);
+      const defaultCard = parent.cardDetail?.paymentMethods?.find(
+        (pm) => pm.isDefault
+      );
       if (!defaultCard) {
         console.log(`No default payment method for parent ${parent.fullName}`);
         continue;
@@ -1318,9 +1366,10 @@ const processPendingPayments = async () => {
       invoice.paidAmount = invoice.totalAmount;
       invoice.paidAt = new Date();
       await invoice.save();
-
     } catch (err) {
-      console.log(`Payment failed for invoice ${invoice.invoiceNumber}: ${err.message}`);
+      console.log(
+        `Payment failed for invoice ${invoice.invoiceNumber}: ${err.message}`
+      );
     }
   }
 
@@ -1332,13 +1381,15 @@ const processRecurringPayments = async () => {
 
   const parents = await Parent.find({
     "recurringPayment.enabled": true,
-    "recurringPayment.nextPaymentDate": { $lte: today }
+    "recurringPayment.nextPaymentDate": { $lte: today },
   }).populate("students");
 
   if (!parents.length) return "No recurring payments scheduled for today";
 
   for (let parent of parents) {
-    const defaultCard = parent.cardDetail?.paymentMethods?.find(pm => pm.isDefault);
+    const defaultCard = parent.cardDetail?.paymentMethods?.find(
+      (pm) => pm.isDefault
+    );
     if (!defaultCard) {
       console.log(`No default card for parent: ${parent.fullName}`);
       continue;
@@ -1375,16 +1426,23 @@ const processRecurringPayments = async () => {
           description: `Recurring payment for ${student.studentName}`,
         });
 
-        console.log(`Payment successful for ${student.studentName} (${parent.fullName})`);
+        console.log(
+          `Payment successful for ${student.studentName} (${parent.fullName})`
+        );
       } catch (err) {
-        console.log(`Payment failed for ${student.studentName}: ${err.message}`);
+        console.log(
+          `Payment failed for ${student.studentName}: ${err.message}`
+        );
       }
     }
 
     let nextDate = new Date(parent.recurringPayment.nextPaymentDate);
-    if (parent.recurringPayment.frequency === "weekly") nextDate.setDate(nextDate.getDate() + 7);
-    else if (parent.recurringPayment.frequency === "monthly") nextDate.setMonth(nextDate.getMonth() + 1);
-    else if (parent.recurringPayment.frequency === "quarterly") nextDate.setMonth(nextDate.getMonth() + 3);
+    if (parent.recurringPayment.frequency === "weekly")
+      nextDate.setDate(nextDate.getDate() + 7);
+    else if (parent.recurringPayment.frequency === "monthly")
+      nextDate.setMonth(nextDate.getMonth() + 1);
+    else if (parent.recurringPayment.frequency === "quarterly")
+      nextDate.setMonth(nextDate.getMonth() + 3);
 
     parent.recurringPayment.nextPaymentDate = nextDate;
     await parent.save();
@@ -1408,5 +1466,5 @@ module.exports = {
   getParentDashboardStats,
   processPendingPayments,
   processRecurringPayments,
-  deleteParent
+  deleteParent,
 };

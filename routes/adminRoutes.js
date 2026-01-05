@@ -14,6 +14,7 @@ const {
   getAdminDashboardStats,
   getThemeByBranch
 } = require("../controllers/AdminController");
+const { uploadThemeFiles } = require("../utils/upload");
 
 router.post("/createAdmin", createAdmin);
 router.post("/getAllSubAdminAgainstAdmin", getAllSubAdminAgainstAdmin);
@@ -25,7 +26,7 @@ router.post("/updateAdmin", updateAdmin);
 router.post("/deleteAdmin", deleteAdmin);
 router.post("/createSubAdmin", createSubAdmin);
 router.post("/editSubAdminById", editSubAdminById);
-router.post("/updateTheme", updateTheme);
+router.post("/updateTheme", uploadThemeFiles, updateTheme);
 router.post("/getAdminDashboardStats", getAdminDashboardStats);
 router.post("/getThemeByBranch", getThemeByBranch);
 
