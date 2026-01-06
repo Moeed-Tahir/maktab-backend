@@ -15,12 +15,12 @@ const { sendWelcomeEmail } = require("../services/emailServices");
 
 const createStudent = async (req, res) => {
   try {
-    const { adminId } = req.body;
+    const { adminId,branch } = req.body;
 
-    if (!adminId) {
+    if (!adminId || !branch) {
       return res.status(400).json({
         success: false,
-        message: "adminId is required",
+        message: "adminId and branch is required",
       });
     }
 
@@ -105,6 +105,7 @@ const createStudent = async (req, res) => {
         identityNumber,
         user: parentUser._id,
         createdBy: adminId,
+        branch
       });
     }
 
@@ -123,6 +124,7 @@ const createStudent = async (req, res) => {
       parent: parent._id,
       user: studentUser._id,
       createdBy: adminId,
+      branch
     });
 
     parent.students.push(student._id);

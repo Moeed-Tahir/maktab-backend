@@ -15,6 +15,7 @@ const {
   getThemeByBranch
 } = require("../controllers/AdminController");
 const { uploadThemeFiles } = require("../utils/upload");
+const { authenticate, authorizeAdmin } = require("../middleware/auth");
 
 router.post("/createAdmin", createAdmin);
 router.post("/getAllSubAdminAgainstAdmin", getAllSubAdminAgainstAdmin);
@@ -28,6 +29,7 @@ router.post("/createSubAdmin", createSubAdmin);
 router.post("/editSubAdminById", editSubAdminById);
 router.post("/updateTheme", uploadThemeFiles, updateTheme);
 router.post("/getAdminDashboardStats", getAdminDashboardStats);
-router.post("/getThemeByBranch", getThemeByBranch);
+
+router.post("/getThemeByBranch", authenticate, authorizeAdmin, getThemeByBranch);
 
 module.exports = router;

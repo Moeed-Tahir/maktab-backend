@@ -48,6 +48,8 @@ const parentSchema = new mongoose.Schema(
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     cardDetail: { type: cardSchema, default: {} },
     recurringPayment: { type: recurringPaymentSchema, default: {} },
+    branch: { type: String, required: true },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Admin",

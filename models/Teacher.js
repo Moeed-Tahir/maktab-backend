@@ -64,6 +64,8 @@ const teacherSchema = new mongoose.Schema(
       default: "Active",
     },
     languages: [String],
+    branch: { type: String, required: true },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Admin",

@@ -12,9 +12,9 @@ const { sendWelcomeEmail } = require("../services/emailServices");
 
 const createTeacher = async (req, res) => {
   try {
-    const { adminId } = req.body;
+    const { adminId,branch } = req.body;
 
-    if (!adminId) {
+    if (!adminId || !branch) {
       return res.status(400).json({
         success: false,
         message: "Admin ID is required",
@@ -92,6 +92,7 @@ const createTeacher = async (req, res) => {
       languages,
       status,
       createdBy: adminId,
+      branch
     });
 
     user.teacher = teacher._id;

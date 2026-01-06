@@ -33,10 +33,10 @@ const createParent = async (req, res) => {
   let stripeCustomer;
 
   try {
-    const { adminId, parent: parentData, children } = req.body;
+    const { adminId, parent: parentData, children,branch } = req.body;
 
-    if (!adminId)
-      return res.status(400).json({ message: "adminId is required" });
+    if (!adminId || !branch)
+      return res.status(400).json({ message: "adminId and branch is required" });
 
     const adminExists = await Admin.findById(adminId);
     if (!adminExists)
@@ -87,6 +87,7 @@ const createParent = async (req, res) => {
         stripeCustomerId: stripeCustomer.id,
         defaultPaymentMethodId: parentData.paymentMethodId,
       },
+      branch
     });
 
     const student = await Student.create({
@@ -99,6 +100,7 @@ const createParent = async (req, res) => {
       parent: parent._id,
       user: studentUser._id,
       createdBy: adminId,
+      branch
     });
 
     parent.students.push(student._id);
